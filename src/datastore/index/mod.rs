@@ -1,15 +1,15 @@
-use std::{collections::HashMap, mem, ops::DerefMut};
+use std::collections::HashMap;
 
-use super::{RecordMetadata, HashedKey};
+use super::{HashedKey, RecordMetadata};
 
 pub struct Index {
     record_vec: Vec<RecordMetadata>,
-    kvs: HashMap<HashedKey, usize>
+    kvs: HashMap<HashedKey, usize>,
 }
 
 impl Index {
     pub fn new() -> Index {
-        return Index {
+        Index {
             record_vec: Vec::new(),
             kvs: HashMap::new(),
         }
@@ -23,26 +23,22 @@ impl Index {
             Some(idx) => {
                 let old = self.record_vec[*idx].clone();
                 self.record_vec[*idx] = meta;
-                return Some(old)
-            },
+                Some(old)
+            }
             None => {
                 let hash = meta.hash;
                 self.record_vec.push(meta);
                 let idx = self.record_vec.len() - 1;
                 self.kvs.insert(hash, idx);
-                return None
-            },
+                None
+            }
         }
     }
 
     pub fn get(&self, hash: HashedKey) -> Option<&RecordMetadata> {
         match self.kvs.get(&hash) {
-            Some(idx) => {
-                return Some(&self.record_vec[*idx])
-            },
-            None => {
-                return None
-            },
+            Some(idx) => Some(&self.record_vec[*idx]),
+            None => None,
         }
     }
 }

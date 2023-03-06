@@ -1,12 +1,8 @@
-use crate::record::{Record, HashedKey, self};
-
-use self::disktable::DiskTable;
+use crate::record::{self, HashedKey, Record};
 
 pub mod disktable;
-pub mod memtable;
 pub mod index;
-
-
+pub mod memtable;
 
 #[derive(Debug, Clone)]
 pub struct RecordMetadata {
@@ -20,25 +16,26 @@ pub struct RecordMetadata {
 #[derive(Debug, Clone)]
 pub enum RecordPtr {
     DiskTable(usize),
-    MemTable(())
+    MemTable(()),
 }
 
 pub struct DataStore {
-   index: index::Index,
-   memtable: memtable::MemTable,
-   table_manager: disktable::Manager
+    index: index::Index,
+    memtable: memtable::MemTable,
+    table_manager: disktable::Manager,
 }
 
 impl DataStore {
     pub fn new() -> DataStore {
-        return DataStore { 
-            index: index::Index::new(), 
+        DataStore {
+            index: index::Index::new(),
             memtable: memtable::MemTable::new(),
-            table_manager: disktable::Manager::new() }
+            table_manager: disktable::Manager::new(),
+        }
     }
 
     pub fn set(&mut self, record: Record) {
-        let hash = record.hash.clone();
+        let hash = record.hash;
         let key_size = record.key.len();
         let value_size = record.value.len();
         let id = self.memtable.append(record);
@@ -55,7 +52,7 @@ impl DataStore {
     }
 
     pub fn get(&self, key: &str) -> Option<&Record> {
-        return self.get_with_hash(record::hash_sha1(key))
+        self.get_with_hash(record::hash_sha1(key))
     }
 
     pub fn get_with_hash(&self, hash: HashedKey) -> Option<&Record> {
@@ -65,13 +62,10 @@ impl DataStore {
         };
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => todo!(),
-            RecordPtr::MemTable(_) => {
-                Some(self.memtable.get_offset(meta.offset))
-            },
+            RecordPtr::MemTable(_) => Some(self.memtable.get_offset(meta.offset)),
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

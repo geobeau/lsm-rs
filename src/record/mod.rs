@@ -1,5 +1,4 @@
-use std::hash::Hash;
-use crypto::{sha1::Sha1, digest::Digest};
+use crypto::{digest::Digest, sha1::Sha1};
 
 pub type HashedKey = [u8; 20];
 
@@ -10,7 +9,7 @@ pub fn hash_sha1(key: &str) -> HashedKey {
     hasher.input_str(key);
     hasher.result(&mut hashed_key);
 
-    return hashed_key;
+    hashed_key
 }
 
 pub struct Record {
@@ -22,6 +21,6 @@ pub struct Record {
 impl Record {
     pub fn new(key: String, value: String) -> Record {
         let hash = hash_sha1(&key);
-        return Record { key, value, hash}
+        Record { key, value, hash }
     }
 }

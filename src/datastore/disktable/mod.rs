@@ -6,21 +6,24 @@ use std::fs::File;
 // Represent an on-disk table
 pub struct DiskTable {
     name: String,
-    fd: File
+    fd: File,
 }
 
 impl DiskTable {
     pub fn new() -> DiskTable {
-        return DiskTable { name: todo!(), fd: todo!() };
+        DiskTable {
+            name: todo!(),
+            fd: todo!(),
+        }
     }
 }
 
 pub struct Manager {
-    tables: Vec<DiskTable>
+    tables: Vec<DiskTable>,
 }
 
 impl Manager {
     pub fn new() -> Manager {
-        return Manager { tables: Vec::new() };
+        Manager { tables: Vec::new() }
     }
 }
