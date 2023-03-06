@@ -12,6 +12,7 @@ pub fn hash_sha1(key: &str) -> HashedKey {
     hashed_key
 }
 
+#[derive(Debug, Clone)]
 pub struct Record {
     pub key: String,
     pub value: String,

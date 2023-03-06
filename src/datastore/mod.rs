@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, rc::Rc};
 
 use crate::record::{self, HashedKey, Record};
 
@@ -9,7 +9,6 @@ pub mod memtable;
 #[derive(Debug, Clone)]
 pub struct RecordMetadata {
     data_ptr: RecordPtr,
-    offset: usize,
     key_size: usize,
     value_size: usize,
     hash: HashedKey,
@@ -17,7 +16,7 @@ pub struct RecordMetadata {
 
 #[derive(Debug, Clone)]
 pub enum RecordPtr {
-    DiskTable(usize),
+    DiskTable((Rc<String>, usize)),
     MemTable(()),
 }
 
@@ -44,7 +43,6 @@ impl DataStore {
 
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(()),
-            offset: id,
             key_size,
             value_size,
             hash,
@@ -53,23 +51,36 @@ impl DataStore {
         self.index.update(meta);
     }
 
-    pub fn get(&self, key: &str) -> Option<&Record> {
+    pub fn get(&mut self, key: &str) -> Option<Record> {
         self.get_with_hash(record::hash_sha1(key))
     }
 
-    pub fn get_with_hash(&self, hash: HashedKey) -> Option<&Record> {
+    pub fn get_with_hash(&mut self, hash: HashedKey) -> Option<Record> {
         let meta = match self.index.get(hash) {
             Some(meta) => meta,
             None => return None,
         };
         match meta.data_ptr {
-            RecordPtr::DiskTable(_) => todo!(),
-            RecordPtr::MemTable(_) => Some(self.memtable.get_offset(meta.offset)),
+            RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta)),
+            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash).clone()),
         }
     }
 
     pub fn force_flush(&mut self) {
-        self.table_manager.flush_memtable(&self.memtable);
+        let offsets = self.table_manager.flush_memtable(&self.memtable);
+        offsets.into_iter()
+        // Update the index
+        .filter_map(|m| self.index.update(m))
+        // Make sure the references are correctly handled
+        .for_each(|old_meta| {
+            match old_meta.data_ptr {
+                RecordPtr::DiskTable(_) => panic!("Unexpected record on disk it should have been in memory, old meta: {:?}", old_meta),
+                RecordPtr::MemTable(_) => self.memtable.references -= 1,
+            };
+        });
+        assert!(self.memtable.references == 0);
+        self.memtable.truncate();
+
     }
 }
 
@@ -100,6 +111,8 @@ mod tests {
         assert!(opt.is_none());
 
         storage.force_flush();
+        let opt = storage.get("test1");
+        assert_eq!(opt.unwrap().value, "foo3");
 
         // let mut storage2 = Storage::new(false); // reload case
         // let opt = storage2.get("test1");
