@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::record::{self, HashedKey, Record};
 
 pub mod disktable;
@@ -26,11 +28,11 @@ pub struct DataStore {
 }
 
 impl DataStore {
-    pub fn new() -> DataStore {
+    pub fn new(directory: PathBuf) -> DataStore {
         DataStore {
             index: index::Index::new(),
             memtable: memtable::MemTable::new(),
-            table_manager: disktable::Manager::new(),
+            table_manager: disktable::Manager::new(directory),
         }
     }
 
@@ -65,6 +67,10 @@ impl DataStore {
             RecordPtr::MemTable(_) => Some(self.memtable.get_offset(meta.offset)),
         }
     }
+
+    pub fn force_flush(&mut self) {
+        self.table_manager.flush_memtable(&self.memtable);
+    }
 }
 
 #[cfg(test)]
@@ -74,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_datastore() {
-        let mut storage = DataStore::new();
+        let mut storage = DataStore::new(PathBuf::from(r"./data/"));
         let opt = storage.get("test");
         assert!(opt.is_none());
 
@@ -92,6 +98,8 @@ mod tests {
 
         let opt = storage.get("test99999"); // unknown key
         assert!(opt.is_none());
+
+        storage.force_flush();
 
         // let mut storage2 = Storage::new(false); // reload case
         // let opt = storage2.get("test1");

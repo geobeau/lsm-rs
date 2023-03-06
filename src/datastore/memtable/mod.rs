@@ -1,3 +1,5 @@
+use std::slice::Iter;
+
 use crate::record::Record;
 
 pub struct MemTable {
@@ -16,5 +18,13 @@ impl MemTable {
 
     pub fn get_offset(&self, offset: usize) -> &Record {
         &self.buffer[offset]
+    }
+
+    pub fn len(&self) -> usize {
+        return self.buffer.len()
+    }
+
+    pub fn iter(&self) -> Iter<Record> {
+        return self.buffer.iter();
     }
 }
