@@ -4,7 +4,6 @@ use std::{
     io::{Read, Seek, Write},
     path::PathBuf,
     rc::Rc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::record::{hash_sha1, Record};
@@ -177,8 +176,7 @@ impl Manager {
     }
 
     pub fn flush_memtable(&mut self, memtable: &MemTable) -> Vec<RecordMetadata> {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        let name = format!("{}-v1.data", timestamp.as_millis());
+        let name = format!("{}-v1.data", crate::time::now());
         let mut file_path = self.directory.clone();
         file_path.push(&name);
         let mut dt = DiskTable::new(Rc::new(name), file_path);

@@ -139,6 +139,8 @@ mod tests {
         let opt = storage.get("test2");
         assert_eq!(opt.unwrap().value, "foo2");
 
+        storage.force_flush();
+
         storage.set(Record::new("test1".to_string(), "foo3".to_string()));
         let opt = storage.get("test1");
         assert_eq!(opt.unwrap().value, "foo3");
@@ -159,6 +161,9 @@ mod tests {
         storage2.rebuild_index_from_disk();
         let opt = storage2.get("test1");
         assert_eq!(opt.unwrap().value, "foo3");
+
+        let opt = storage2.get("test2");
+        assert_eq!(opt.unwrap().value, "foo2");
         // let opt = storage2.get("test1");
         // assert_eq!(opt.unwrap().as_ref(), "foo3");
 
