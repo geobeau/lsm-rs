@@ -1,6 +1,6 @@
-use std::{slice::Iter, collections::{HashSet, HashMap}};
+use std::collections::HashMap;
 
-use crate::record::{Record, HashedKey};
+use crate::record::{HashedKey, Record};
 
 pub struct MemTable {
     buffer: HashMap<HashedKey, Record>,
@@ -12,7 +12,11 @@ pub struct MemTable {
 
 impl MemTable {
     pub fn new() -> MemTable {
-        MemTable { buffer: HashMap::new(), references: 0, bytes: 0 }
+        MemTable {
+            buffer: HashMap::new(),
+            references: 0,
+            bytes: 0,
+        }
     }
 
     pub fn append(&mut self, record: Record) {
@@ -20,12 +24,12 @@ impl MemTable {
         match self.buffer.insert(record.hash, record) {
             Some(old) => {
                 self.bytes += size - old.size_of();
-            },
+            }
             None => {
                 self.references += 1;
                 self.bytes += size;
-            },
-        }           
+            }
+        }
     }
 
     pub fn get(&self, hash: &HashedKey) -> &Record {
@@ -33,15 +37,15 @@ impl MemTable {
     }
 
     pub fn len(&self) -> usize {
-        return self.buffer.len()
+        self.buffer.len()
     }
 
     pub fn references(&self) -> usize {
-        return self.references
+        self.references
     }
 
     pub fn iter(&self) -> std::collections::hash_map::Values<[u8; 20], Record> {
-        return self.buffer.values().into_iter();
+        self.buffer.values()
     }
 
     pub fn truncate(&mut self) {

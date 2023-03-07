@@ -18,7 +18,7 @@ pub struct RecordMetadata {
 impl RecordMetadata {
     /// Return the size in number of bytes of the record
     pub fn size_of(&self) -> usize {
-        return self.key_size as usize + self.value_size as usize + 14
+        self.key_size as usize + self.value_size as usize + 14
     }
 }
 
@@ -80,23 +80,27 @@ impl DataStore {
             None => return None,
         };
         match meta.data_ptr {
-            RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta)),
+            RecordPtr::DiskTable(_) => Some(self.table_manager.get(meta)),
             RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash).clone()),
         }
     }
 
     pub fn force_flush(&mut self) {
         let offsets = self.table_manager.flush_memtable(&self.memtable);
-        offsets.into_iter()
-        // Update the index
-        .filter_map(|m| self.index.update(m))
-        // Make sure the references are correctly handled
-        .for_each(|old_meta| {
-            match old_meta.data_ptr {
-                RecordPtr::DiskTable(_) => panic!("Unexpected record on disk it should have been in memory, old meta: {:?}", old_meta),
-                RecordPtr::MemTable(_) => self.memtable.references -= 1,
-            };
-        });
+        offsets
+            .into_iter()
+            // Update the index
+            .filter_map(|m| self.index.update(m))
+            // Make sure the references are correctly handled
+            .for_each(|old_meta| {
+                match old_meta.data_ptr {
+                    RecordPtr::DiskTable(_) => panic!(
+                        "Unexpected record on disk it should have been in memory, old meta: {:?}",
+                        old_meta
+                    ),
+                    RecordPtr::MemTable(_) => self.memtable.references -= 1,
+                };
+            });
         assert!(self.memtable.references == 0);
         self.memtable.truncate();
     }
