@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crypto::{digest::Digest, sha1::Sha1};
 
 pub type HashedKey = [u8; 20];
@@ -17,11 +19,17 @@ pub struct Record {
     pub key: String,
     pub value: String,
     pub hash: HashedKey,
+    pub timestamp: u64,
 }
 
 impl Record {
     pub fn new(key: String, value: String) -> Record {
         let hash = hash_sha1(&key);
-        Record { key, value, hash }
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        Record { key, value, hash, timestamp }
+    }
+
+    pub fn size_of(&self) -> usize {
+        return 2 + 4 + 8 + self.key.len() + self.value.len() 
     }
 }

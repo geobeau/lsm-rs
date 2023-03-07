@@ -4,20 +4,28 @@ use crate::record::{Record, HashedKey};
 
 pub struct MemTable {
     buffer: HashMap<HashedKey, Record>,
+    /// Number of references on it from the index
     pub references: usize,
+    /// Number of bytes of data added to it
+    bytes: usize,
 }
 
 impl MemTable {
     pub fn new() -> MemTable {
-        MemTable { buffer: HashMap::new(), references: 0 }
+        MemTable { buffer: HashMap::new(), references: 0, bytes: 0 }
     }
 
-    pub fn append(&mut self, record: Record) -> usize {
-        if self.buffer.insert(record.hash, record).is_none() {
-            // Update reference only if there was no values before 
-            self.references += 1;
-        }
-        self.buffer.len() - 1
+    pub fn append(&mut self, record: Record) {
+        let size = record.size_of();
+        match self.buffer.insert(record.hash, record) {
+            Some(old) => {
+                self.bytes += size - old.size_of();
+            },
+            None => {
+                self.references += 1;
+                self.bytes += size;
+            },
+        }           
     }
 
     pub fn get(&self, hash: &HashedKey) -> &Record {
@@ -25,6 +33,10 @@ impl MemTable {
     }
 
     pub fn len(&self) -> usize {
+        return self.buffer.len()
+    }
+
+    pub fn references(&self) -> usize {
         return self.references
     }
 

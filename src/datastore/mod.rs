@@ -9,9 +9,17 @@ pub mod memtable;
 #[derive(Debug, Clone)]
 pub struct RecordMetadata {
     data_ptr: RecordPtr,
-    key_size: usize,
-    value_size: usize,
+    key_size: u16,
+    value_size: u32,
+    timestamp: u64,
     hash: HashedKey,
+}
+
+impl RecordMetadata {
+    /// Return the size in number of bytes of the record
+    pub fn size_of(&self) -> usize {
+        return self.key_size as usize + self.value_size as usize + 14
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -35,16 +43,27 @@ impl DataStore {
         }
     }
 
+    pub fn init(&mut self) {
+        self.table_manager.init();
+    }
+
+    pub fn truncate(&mut self) {
+        self.memtable.truncate();
+        self.table_manager.truncate();
+    }
+
     pub fn set(&mut self, record: Record) {
         let hash = record.hash;
-        let key_size = record.key.len();
-        let value_size = record.value.len();
-        let id = self.memtable.append(record);
+        let key_size = record.key.len() as u16;
+        let value_size = record.value.len() as u32;
+        let timestamp = record.timestamp;
+        self.memtable.append(record);
 
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(()),
             key_size,
             value_size,
+            timestamp,
             hash,
         };
 
@@ -80,7 +99,6 @@ impl DataStore {
         });
         assert!(self.memtable.references == 0);
         self.memtable.truncate();
-
     }
 }
 
@@ -92,6 +110,8 @@ mod tests {
     #[test]
     fn test_datastore() {
         let mut storage = DataStore::new(PathBuf::from(r"./data/"));
+        storage.init();
+        storage.truncate();
         let opt = storage.get("test");
         assert!(opt.is_none());
 
