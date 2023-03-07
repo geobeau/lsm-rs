@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
 use super::{HashedKey, RecordMetadata};
 
@@ -16,14 +16,20 @@ impl Index {
     }
 
     /// Update the index with new metadata
-    /// If there was already a record in the index with older metadata
+    /// If there was already a record in the index with older metadata (timestamp)
     /// return it and apply the new one.
     pub fn update(&mut self, meta: RecordMetadata) -> Option<RecordMetadata> {
         match self.kvs.get(&meta.hash) {
             Some(idx) => {
                 let old = self.record_vec[*idx].clone();
-                self.record_vec[*idx] = meta;
-                Some(old)
+                match meta.timestamp.cmp(&old.timestamp) {
+                    // If the new record is older, return it as older
+                    std::cmp::Ordering::Less => Some(meta),
+                    _ => {
+                        self.record_vec[*idx] = meta;
+                        Some(old)
+                    }
+                }
             }
             None => {
                 let hash = meta.hash;
@@ -40,5 +46,10 @@ impl Index {
             Some(idx) => Some(&self.record_vec[*idx]),
             None => None,
         }
+    }
+
+    pub fn truncate(&mut self) {
+        self.kvs.clear();
+        self.record_vec.truncate(0);
     }
 }

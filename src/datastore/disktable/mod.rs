@@ -66,7 +66,7 @@ impl DiskTable {
             let key =
                 std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
             meta.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
+                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
                 key_size,
                 value_size,
                 hash: hash_sha1(key),
@@ -97,7 +97,7 @@ impl DiskTable {
             buf.extend(r.key.as_bytes());
             buf.extend(r.value.as_bytes());
         });
-        self.fd.write(&buf).unwrap();
+        self.fd.write_all(&buf).unwrap();
         memtable.len();
         offsets
     }
@@ -105,7 +105,8 @@ impl DiskTable {
 
 pub struct Manager {
     directory: PathBuf,
-    tables: HashMap<Rc<String>, DiskTable>,
+    // TODO: make tables private and implement iterator
+    pub tables: HashMap<Rc<String>, DiskTable>,
 }
 
 impl Manager {
@@ -157,8 +158,12 @@ impl Manager {
                     .seek(std::io::SeekFrom::Start(*offset as u64))
                     .unwrap();
                 let mut buf = vec![0u8; meta.size_of()];
+                println!(
+                    "position: {:?} meta: {:?}",
+                    table.fd.stream_position().unwrap(),
+                    meta
+                );
                 table.fd.read_exact(&mut buf).unwrap();
-                println!("Buffer: {:?}", buf);
                 let key = std::str::from_utf8(&buf[14..14 + meta.key_size as usize]).unwrap();
                 let value = std::str::from_utf8(
                     &buf[14 + meta.key_size as usize

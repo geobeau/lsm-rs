@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+
 
 use crypto::{digest::Digest, sha1::Sha1};
 
@@ -25,10 +25,7 @@ pub struct Record {
 impl Record {
     pub fn new(key: String, value: String) -> Record {
         let hash = hash_sha1(&key);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = crate::time::now();
         Record {
             key,
             value,

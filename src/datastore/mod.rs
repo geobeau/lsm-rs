@@ -22,7 +22,7 @@ impl RecordMetadata {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RecordPtr {
     DiskTable((Rc<String>, usize)),
     MemTable(()),
@@ -48,6 +48,7 @@ impl DataStore {
     }
 
     pub fn truncate(&mut self) {
+        self.index.truncate();
         self.memtable.truncate();
         self.table_manager.truncate();
     }
@@ -72,6 +73,17 @@ impl DataStore {
 
     pub fn get(&mut self, key: &str) -> Option<Record> {
         self.get_with_hash(record::hash_sha1(key))
+    }
+
+    pub fn rebuild_index_from_disk(&mut self) {
+        self.table_manager
+            .tables
+            .iter_mut()
+            .flat_map(|(_, t)| t.read_all_metadata())
+            .filter_map(|meta| self.index.update(meta))
+            .for_each(|meta| {
+                meta.size_of(); // TODO: make sure references are properly updated
+            });
     }
 
     pub fn get_with_hash(&mut self, hash: HashedKey) -> Option<Record> {
@@ -138,7 +150,15 @@ mod tests {
         let opt = storage.get("test1");
         assert_eq!(opt.unwrap().value, "foo3");
 
-        // let mut storage2 = Storage::new(false); // reload case
+        let mut storage2 = DataStore::new(PathBuf::from(r"./data/"));
+        storage2.init();
+
+        let opt = storage2.get("test1");
+        assert!(opt.is_none());
+
+        storage2.rebuild_index_from_disk();
+        let opt = storage2.get("test1");
+        assert_eq!(opt.unwrap().value, "foo3");
         // let opt = storage2.get("test1");
         // assert_eq!(opt.unwrap().as_ref(), "foo3");
 
