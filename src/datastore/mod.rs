@@ -29,6 +29,7 @@ impl RecordMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordPtr {
     DiskTable((Rc<String>, usize)),
+    Compacting((Rc<String>, usize)),
     MemTable(()),
 }
 
@@ -36,49 +37,6 @@ pub struct DataStore {
     index: index::Index,
     memtable: memtable::MemTable,
     table_manager: disktable::Manager,
-}
-
-#[derive(Debug, Clone)]
-pub enum MemtableEntry {
-    Record(Record),
-    Tombstone(Tombstone),
-}
-
-impl MemtableEntry {
-    pub fn size_of(&self) -> usize {
-        match self {
-            MemtableEntry::Record(r) => r.size_of(),
-            MemtableEntry::Tombstone(t) => t.size_of(),
-        }
-    }
-
-    pub fn get_hash(&self) -> HashedKey {
-        match self {
-            MemtableEntry::Record(r) => r.hash,
-            MemtableEntry::Tombstone(t) => t.hash,
-        }
-    }
-
-    pub fn get_key_len(&self) -> usize {
-        match self {
-            MemtableEntry::Record(r) => r.key.len(),
-            MemtableEntry::Tombstone(t) => t.key.len(),
-        }
-    }
-
-    pub fn get_timestamp(&self) -> u64 {
-        match self {
-            MemtableEntry::Record(r) => r.timestamp,
-            MemtableEntry::Tombstone(t) => t.timestamp,
-        }
-    }
-
-    pub fn get_value_len(&self) -> usize {
-        match self {
-            MemtableEntry::Record(r) => r.value.len(),
-            MemtableEntry::Tombstone(_) => 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +52,7 @@ impl Tombstone {
     }
 }
 
+#[derive(Debug)]
 pub struct Stats {
     /// Number of records in the index
     /// Should be equal to memtable_refs and disktable_refs
@@ -134,25 +93,26 @@ impl DataStore {
     }
 
     pub fn set(&mut self, record: Record) {
-        self.set_raw(MemtableEntry::Record(record));
+        self.set_raw(record);
     }
 
     pub fn delete(&mut self, key: &str) {
         let hash = hash_sha1(key);
         let timestamp = crate::time::now();
-        self.set_raw(MemtableEntry::Tombstone(Tombstone {
+        self.set_raw(Record {
             key: key.to_string(),
+            value: "".to_string(),
             hash,
             timestamp,
-        }));
+        });
     }
 
-    fn set_raw(&mut self, e: MemtableEntry) {
-        let hash = e.get_hash();
-        let key_size = e.get_key_len() as u16;
-        let value_size = e.get_value_len() as u32;
-        let timestamp = e.get_timestamp();
-        self.memtable.append(e);
+    fn set_raw(&mut self, r: Record) {
+        let hash = r.hash;
+        let key_size = r.key.len() as u16;
+        let value_size = r.value.len() as u32;
+        let timestamp = r.timestamp;
+        self.memtable.append(r);
 
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(()),
@@ -195,28 +155,28 @@ impl DataStore {
         }
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => Some(self.table_manager.get(meta)),
-            RecordPtr::MemTable(_) => {
-                match self.memtable.get(&meta.hash) {
-                    MemtableEntry::Record(r) => Some(r.clone()),
-                    // TODO: remove/log as it should not be reached (discard at result)
-                    MemtableEntry::Tombstone(_) => None,
-                }
-            }
+            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash).clone()),
+            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash).clone()),
         }
     }
 
     pub fn force_flush(&mut self) {
         let offsets = self.table_manager.flush_memtable(&self.memtable);
+        println!("OUGO BOUGA");
+        println!("before: {:?}", self.index);
         let meta_to_update: Vec<RecordMetadata> = offsets
             .into_iter()
             // Update the index
             .filter_map(|m| self.index.update(m))
             .collect();
-
+        println!("need to update old: {:?}", self.get_stats());
+        println!("need to update old: {:?}", meta_to_update);
         meta_to_update
             .iter()
             // Make sure the references are correctly handled
             .for_each(|old_meta| self.remove_reference_from_storage(old_meta));
+        println!("{:?}", self.get_stats());
+        println!("{:?}", self.index);
         assert!(self.memtable.references == 0);
         self.memtable.truncate();
     }
@@ -227,7 +187,37 @@ impl DataStore {
                 self.table_manager.remove_reference_from_storage(table)
             }
             RecordPtr::MemTable(_) => self.memtable.references -= 1,
+            RecordPtr::Compacting((table, _)) => {
+                self.table_manager.remove_reference_from_storage(table);
+                self.memtable.references -= 1;
+            }
         };
+    }
+
+    pub fn reclaim_all_disktables(&mut self) {
+        let meta_to_update: Vec<RecordMetadata> = self
+            .table_manager
+            .tables
+            .iter_mut()
+            .flat_map(|(_, t)| t.read_all_data())
+            .filter_map(|(record, mut meta)| {
+                if let Some(in_index_meta) = self.index.get(meta.hash) {
+                    // Skip record if one is newer in memory
+                    if meta.timestamp.lt(&in_index_meta.timestamp) {
+                        return Some(meta);
+                    }
+                }
+                if let RecordPtr::DiskTable((t, o)) = meta.data_ptr {
+                    meta.data_ptr = RecordPtr::Compacting((t, o))
+                }
+                self.memtable.append(record);
+                self.index.update(meta)
+            })
+            .collect();
+
+        meta_to_update
+            .iter()
+            .for_each(|meta| self.remove_reference_from_storage(meta));
     }
 
     /// Return number of active records from memtable/index
@@ -314,5 +304,37 @@ mod tests {
         let opt = storage2.get("test3");
         assert!(opt.is_none());
         storage2.get_stats().assert_not_corrupted();
+
+        println!("{:?}", storage2.get_stats());
+        storage2.reclaim_all_disktables();
+        println!("{:?}", storage2.get_stats());
+        assert_eq!(
+            storage2
+                .table_manager
+                .get_disktables_marked_for_deletion()
+                .len(),
+            0
+        );
+        storage2.force_flush();
+        assert_eq!(
+            storage2
+                .table_manager
+                .get_disktables_marked_for_deletion()
+                .len(),
+            2
+        );
+        storage2
+            .table_manager
+            .delete_disktables_marked_for_deletion();
+        storage2.get_stats().assert_not_corrupted();
+
+        let opt = storage.get("test1");
+        assert_eq!(opt.unwrap().value, "foo3");
+
+        let opt = storage.get("test2");
+        assert_eq!(opt.unwrap().value, "foo2");
+
+        let opt = storage2.get("test3");
+        assert!(opt.is_none());
     }
 }

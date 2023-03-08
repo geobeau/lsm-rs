@@ -22,8 +22,12 @@ pub struct Record {
 
 impl Record {
     pub fn new(key: String, value: String) -> Record {
-        let hash = hash_sha1(&key);
         let timestamp = crate::time::now();
+        Record::new_with_timestamp(key, value, timestamp)
+    }
+
+    pub fn new_with_timestamp(key: String, value: String, timestamp: u64) -> Record {
+        let hash = hash_sha1(&key);
         Record {
             key,
             value,

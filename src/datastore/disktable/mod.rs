@@ -22,6 +22,7 @@ pub struct DiskTable {
     path: PathBuf,
     count: u16,
     references: u16,
+    deletion_marker: bool,
     fd: File,
 }
 
@@ -32,6 +33,7 @@ impl DiskTable {
             path: path.clone(),
             count: 0,
             references: 0,
+            deletion_marker: false,
             fd: File::options()
                 .create(true)
                 .read(true)
@@ -80,45 +82,79 @@ impl DiskTable {
         meta
     }
 
+    pub fn read_all_data(&mut self) -> Vec<(Record, RecordMetadata)> {
+        self.fd.seek(std::io::SeekFrom::Start(0)).unwrap();
+        let mut buf: Vec<u8> = Vec::new();
+        self.fd.read_to_end(&mut buf).unwrap();
+        let count = u16::from_le_bytes(buf[0..2].try_into().expect("incorrect length"));
+        let mut meta = Vec::with_capacity(count as usize);
+        let mut cursor = 2;
+        for _ in 0..count {
+            let key_size = u16::from_le_bytes(
+                buf[cursor..cursor + 2]
+                    .try_into()
+                    .expect("incorrect length"),
+            );
+            let value_size = u32::from_le_bytes(
+                buf[cursor + 2..cursor + 6]
+                    .try_into()
+                    .expect("incorrect length"),
+            );
+            let timestamp = u64::from_le_bytes(
+                buf[cursor + 6..cursor + 14]
+                    .try_into()
+                    .expect("incorrect length"),
+            );
+            let key =
+                std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
+            let value = std::str::from_utf8(
+                &buf[cursor + 14 + key_size as usize
+                    ..cursor + 14 + key_size as usize + value_size as usize],
+            )
+            .unwrap();
+
+            let hash = hash_sha1(key);
+            meta.push((
+                Record {
+                    hash,
+                    timestamp,
+                    key: key.to_string(),
+                    value: value.to_string(),
+                },
+                RecordMetadata {
+                    data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
+                    key_size,
+                    value_size,
+                    hash,
+                    timestamp,
+                },
+            ));
+            self.references += 1;
+            cursor += meta.last().unwrap().1.size_of();
+        }
+        meta
+    }
+
     pub fn flush_from_memtable(&mut self, memtable: &MemTable) -> Vec<RecordMetadata> {
         let mut offsets = Vec::new();
         self.fd.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         buf.extend((memtable.len() as u16).to_le_bytes());
-        memtable.iter().for_each(|e| {
-            match e {
-                super::MemtableEntry::Record(r) => {
-                    offsets.push(RecordMetadata {
-                        data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
-                        key_size: r.key.len() as u16,
-                        value_size: r.value.len() as u32,
-                        timestamp: r.timestamp,
-                        hash: r.hash,
-                    });
-                    self.count += 1;
-                    self.references += 1;
-                    buf.extend((r.key.len() as u16).to_le_bytes());
-                    buf.extend((r.value.len() as u32).to_le_bytes());
-                    buf.extend(r.timestamp.to_le_bytes());
-                    buf.extend(r.key.as_bytes());
-                    buf.extend(r.value.as_bytes());
-                }
-                super::MemtableEntry::Tombstone(t) => {
-                    offsets.push(RecordMetadata {
-                        data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
-                        key_size: t.key.len() as u16,
-                        value_size: 0,
-                        timestamp: t.timestamp,
-                        hash: t.hash,
-                    });
-                    self.count += 1;
-                    self.references += 1;
-                    buf.extend((t.key.len() as u16).to_le_bytes());
-                    buf.extend((0u32).to_le_bytes());
-                    buf.extend(t.timestamp.to_le_bytes());
-                    buf.extend(t.key.as_bytes());
-                }
-            };
+        memtable.iter().for_each(|r| {
+            offsets.push(RecordMetadata {
+                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
+                key_size: r.key.len() as u16,
+                value_size: r.value.len() as u32,
+                timestamp: r.timestamp,
+                hash: r.hash,
+            });
+            self.count += 1;
+            self.references += 1;
+            buf.extend((r.key.len() as u16).to_le_bytes());
+            buf.extend((r.value.len() as u32).to_le_bytes());
+            buf.extend(r.timestamp.to_le_bytes());
+            buf.extend(r.key.as_bytes());
+            buf.extend(r.value.as_bytes());
         });
         self.fd.write_all(&buf).unwrap();
         memtable.len();
@@ -126,7 +162,10 @@ impl DiskTable {
     }
 
     fn decr_reference(&mut self) {
-        self.references -= 1
+        self.references -= 1;
+        if self.references == 0 {
+            self.deletion_marker = true
+        }
     }
 }
 
@@ -164,6 +203,7 @@ impl Manager {
                     path: file.path(),
                     count: u16::from_le_bytes(count),
                     references: 0,
+                    deletion_marker: false,
                     fd,
                 },
             );
@@ -192,13 +232,15 @@ impl Manager {
                     meta
                 );
                 table.fd.read_exact(&mut buf).unwrap();
+                let timestamp =
+                    u64::from_le_bytes(buf[6..14].try_into().expect("incorrect length"));
                 let key = std::str::from_utf8(&buf[14..14 + meta.key_size as usize]).unwrap();
                 let value = std::str::from_utf8(
                     &buf[14 + meta.key_size as usize
                         ..14 + meta.key_size as usize + meta.value_size as usize],
                 )
                 .unwrap();
-                Record::new(key.to_string(), value.to_string())
+                Record::new_with_timestamp(key.to_string(), value.to_string(), timestamp)
             }
             _ => panic!("Trying to query disk with a non disk pointer"),
         }
@@ -216,6 +258,25 @@ impl Manager {
 
     pub fn remove_reference_from_storage(&mut self, table: &Rc<String>) {
         self.tables.get_mut(table).unwrap().decr_reference()
+    }
+
+    pub fn get_disktables_marked_for_deletion(&self) -> Vec<Rc<String>> {
+        self.tables
+            .iter()
+            .filter(|(_, t)| t.deletion_marker)
+            .map(|(n, _)| n)
+            .cloned()
+            .collect()
+    }
+
+    pub fn delete_disktables_marked_for_deletion(&mut self) {
+        self.get_disktables_marked_for_deletion()
+            .iter()
+            .for_each(|t| {
+                let table = self.tables.get(t).unwrap();
+                std::fs::remove_file(&table.path).unwrap();
+                self.tables.remove(t);
+            });
     }
 
     pub fn references(&self) -> usize {
