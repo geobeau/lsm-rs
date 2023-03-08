@@ -98,7 +98,7 @@ impl DiskTable {
                     buf.extend(r.timestamp.to_le_bytes());
                     buf.extend(r.key.as_bytes());
                     buf.extend(r.value.as_bytes());
-                },
+                }
                 super::MemtableEntry::Tombstone(t) => {
                     offsets.push(RecordMetadata {
                         data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
@@ -112,7 +112,7 @@ impl DiskTable {
                     buf.extend((0u32).to_le_bytes());
                     buf.extend(t.timestamp.to_le_bytes());
                     buf.extend(t.key.as_bytes());
-                },
+                }
             };
         });
         self.fd.write_all(&buf).unwrap();

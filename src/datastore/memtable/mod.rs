@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::record::{HashedKey};
+use crate::record::HashedKey;
 
 use super::MemtableEntry;
 

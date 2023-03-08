@@ -1,6 +1,6 @@
-use std::{path::PathBuf, rc::Rc, hash::Hash};
+use std::{hash::Hash, path::PathBuf, rc::Rc};
 
-use crate::record::{self, HashedKey, Record, hash_sha1};
+use crate::record::{self, hash_sha1, HashedKey, Record};
 
 pub mod disktable;
 pub mod index;
@@ -22,7 +22,7 @@ impl RecordMetadata {
     }
 
     pub fn is_tombstone(&self) -> bool {
-        return self.value_size == 0
+        self.value_size == 0
     }
 }
 
@@ -73,8 +73,6 @@ impl Tombstone {
     }
 }
 
-
-
 impl DataStore {
     pub fn new(directory: PathBuf) -> DataStore {
         DataStore {
@@ -117,8 +115,12 @@ impl DataStore {
         let key_size = key.len() as u16;
         let value_size = 0;
         let timestamp = crate::time::now();
-        self.memtable.append(MemtableEntry::Tombstone(Tombstone { key: key.to_string(), hash: hash, timestamp: timestamp }));
-        
+        self.memtable.append(MemtableEntry::Tombstone(Tombstone {
+            key: key.to_string(),
+            hash,
+            timestamp,
+        }));
+
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(()),
             key_size,
@@ -151,17 +153,17 @@ impl DataStore {
             None => return None,
         };
         if meta.is_tombstone() {
-            return None
+            return None;
         }
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => Some(self.table_manager.get(meta)),
-            RecordPtr::MemTable(_) =>  {
+            RecordPtr::MemTable(_) => {
                 match self.memtable.get(&meta.hash) {
                     MemtableEntry::Record(r) => Some(r.clone()),
                     // TODO: remove/log as it should not be reached (discard at result)
                     MemtableEntry::Tombstone(_) => None,
                 }
-            },
+            }
         }
     }
 

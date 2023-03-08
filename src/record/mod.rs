@@ -1,5 +1,3 @@
-
-
 use crypto::{digest::Digest, sha1::Sha1};
 
 pub type HashedKey = [u8; 20];
