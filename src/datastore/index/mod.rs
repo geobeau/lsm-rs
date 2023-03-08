@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::{HashedKey, RecordMetadata};
 
+#[derive(Debug)]
 pub struct Index {
     record_vec: Vec<RecordMetadata>,
     kvs: HashMap<HashedKey, usize>,
@@ -51,5 +52,9 @@ impl Index {
     pub fn truncate(&mut self) {
         self.kvs.clear();
         self.record_vec.truncate(0);
+    }
+
+    pub fn len(&self) -> usize {
+        self.kvs.len()
     }
 }

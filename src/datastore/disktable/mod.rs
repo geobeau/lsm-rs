@@ -21,6 +21,7 @@ pub struct DiskTable {
     name: Rc<String>,
     path: PathBuf,
     count: u16,
+    references: u16,
     fd: File,
 }
 
@@ -30,6 +31,7 @@ impl DiskTable {
             name,
             path: path.clone(),
             count: 0,
+            references: 0,
             fd: File::options()
                 .create(true)
                 .read(true)
@@ -72,6 +74,7 @@ impl DiskTable {
                 hash: hash_sha1(key),
                 timestamp,
             });
+            self.references += 1;
             cursor += meta.last().unwrap().size_of();
         }
         meta
@@ -93,6 +96,7 @@ impl DiskTable {
                         hash: r.hash,
                     });
                     self.count += 1;
+                    self.references += 1;
                     buf.extend((r.key.len() as u16).to_le_bytes());
                     buf.extend((r.value.len() as u32).to_le_bytes());
                     buf.extend(r.timestamp.to_le_bytes());
@@ -108,6 +112,7 @@ impl DiskTable {
                         hash: t.hash,
                     });
                     self.count += 1;
+                    self.references += 1;
                     buf.extend((t.key.len() as u16).to_le_bytes());
                     buf.extend((0u32).to_le_bytes());
                     buf.extend(t.timestamp.to_le_bytes());
@@ -118,6 +123,10 @@ impl DiskTable {
         self.fd.write_all(&buf).unwrap();
         memtable.len();
         offsets
+    }
+
+    fn decr_reference(&mut self) {
+        self.references -= 1
     }
 }
 
@@ -154,6 +163,7 @@ impl Manager {
                     name,
                     path: file.path(),
                     count: u16::from_le_bytes(count),
+                    references: 0,
                     fd,
                 },
             );
@@ -202,5 +212,21 @@ impl Manager {
         let offsets = dt.flush_from_memtable(memtable);
         self.tables.insert(dt.name.clone(), dt);
         offsets
+    }
+
+    pub fn remove_reference_from_storage(&mut self, table: &Rc<String>) {
+        self.tables.get_mut(table).unwrap().decr_reference()
+    }
+
+    pub fn references(&self) -> usize {
+        self.tables
+            .iter()
+            .fold(0, |size, t| size + t.1.references as usize)
+    }
+
+    pub fn len(&self) -> usize {
+        self.tables
+            .iter()
+            .fold(0, |size, t| size + t.1.count as usize)
     }
 }
