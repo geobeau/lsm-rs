@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use crate::record::{HashedKey, Record};
+use crate::record::{HashedKey};
+
+use super::MemtableEntry;
 
 pub struct MemTable {
-    buffer: HashMap<HashedKey, Record>,
+    buffer: HashMap<HashedKey, MemtableEntry>,
     /// Number of references on it from the index
     pub references: usize,
     /// Number of bytes of data added to it
@@ -19,9 +21,9 @@ impl MemTable {
         }
     }
 
-    pub fn append(&mut self, record: Record) {
+    pub fn append(&mut self, record: MemtableEntry) {
         let size = record.size_of();
-        match self.buffer.insert(record.hash, record) {
+        match self.buffer.insert(record.get_hash(), record) {
             Some(old) => {
                 self.bytes += size - old.size_of();
             }
@@ -32,7 +34,7 @@ impl MemTable {
         }
     }
 
-    pub fn get(&self, hash: &HashedKey) -> &Record {
+    pub fn get(&self, hash: &HashedKey) -> &MemtableEntry {
         &self.buffer[hash]
     }
 
@@ -44,7 +46,7 @@ impl MemTable {
         self.references
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Values<[u8; 20], Record> {
+    pub fn iter(&self) -> std::collections::hash_map::Values<[u8; 20], MemtableEntry> {
         self.buffer.values()
     }
 

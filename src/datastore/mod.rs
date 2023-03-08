@@ -1,6 +1,6 @@
-use std::{path::PathBuf, rc::Rc};
+use std::{path::PathBuf, rc::Rc, hash::Hash};
 
-use crate::record::{self, HashedKey, Record};
+use crate::record::{self, HashedKey, Record, hash_sha1};
 
 pub mod disktable;
 pub mod index;
@@ -8,17 +8,21 @@ pub mod memtable;
 
 #[derive(Debug, Clone)]
 pub struct RecordMetadata {
-    data_ptr: RecordPtr,
     key_size: u16,
     value_size: u32,
     timestamp: u64,
     hash: HashedKey,
+    data_ptr: RecordPtr,
 }
 
 impl RecordMetadata {
     /// Return the size in number of bytes of the record
     pub fn size_of(&self) -> usize {
         self.key_size as usize + self.value_size as usize + 14
+    }
+
+    pub fn is_tombstone(&self) -> bool {
+        return self.value_size == 0
     }
 }
 
@@ -33,6 +37,43 @@ pub struct DataStore {
     memtable: memtable::MemTable,
     table_manager: disktable::Manager,
 }
+
+#[derive(Debug, Clone)]
+pub enum MemtableEntry {
+    Record(Record),
+    Tombstone(Tombstone),
+}
+
+impl MemtableEntry {
+    pub fn size_of(&self) -> usize {
+        match self {
+            MemtableEntry::Record(r) => r.size_of(),
+            MemtableEntry::Tombstone(t) => t.size_of(),
+        }
+    }
+
+    pub fn get_hash(&self) -> HashedKey {
+        match self {
+            MemtableEntry::Record(r) => r.hash,
+            MemtableEntry::Tombstone(t) => t.hash,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Tombstone {
+    pub key: String,
+    pub hash: HashedKey,
+    pub timestamp: u64,
+}
+
+impl Tombstone {
+    pub fn size_of(&self) -> usize {
+        2 + 4 + 8 + self.key.len()
+    }
+}
+
+
 
 impl DataStore {
     pub fn new(directory: PathBuf) -> DataStore {
@@ -58,8 +99,26 @@ impl DataStore {
         let key_size = record.key.len() as u16;
         let value_size = record.value.len() as u32;
         let timestamp = record.timestamp;
-        self.memtable.append(record);
+        self.memtable.append(MemtableEntry::Record(record));
 
+        let meta = RecordMetadata {
+            data_ptr: RecordPtr::MemTable(()),
+            key_size,
+            value_size,
+            timestamp,
+            hash,
+        };
+
+        self.index.update(meta);
+    }
+
+    pub fn delete(&mut self, key: &str) {
+        let hash = hash_sha1(key);
+        let key_size = key.len() as u16;
+        let value_size = 0;
+        let timestamp = crate::time::now();
+        self.memtable.append(MemtableEntry::Tombstone(Tombstone { key: key.to_string(), hash: hash, timestamp: timestamp }));
+        
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(()),
             key_size,
@@ -91,9 +150,18 @@ impl DataStore {
             Some(meta) => meta,
             None => return None,
         };
+        if meta.is_tombstone() {
+            return None
+        }
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => Some(self.table_manager.get(meta)),
-            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash).clone()),
+            RecordPtr::MemTable(_) =>  {
+                match self.memtable.get(&meta.hash) {
+                    MemtableEntry::Record(r) => Some(r.clone()),
+                    // TODO: remove/log as it should not be reached (discard at result)
+                    MemtableEntry::Tombstone(_) => None,
+                }
+            },
         }
     }
 
@@ -139,6 +207,10 @@ mod tests {
         let opt = storage.get("test2");
         assert_eq!(opt.unwrap().value, "foo2");
 
+        storage.set(Record::new("test3".to_string(), "foo99".to_string()));
+        let opt = storage.get("test3");
+        assert_eq!(opt.unwrap().value, "foo99");
+
         storage.force_flush();
 
         storage.set(Record::new("test1".to_string(), "foo3".to_string()));
@@ -146,6 +218,10 @@ mod tests {
         assert_eq!(opt.unwrap().value, "foo3");
 
         let opt = storage.get("test99999"); // unknown key
+        assert!(opt.is_none());
+
+        storage.delete("test3");
+        let opt = storage.get("test3");
         assert!(opt.is_none());
 
         storage.force_flush();
@@ -164,10 +240,10 @@ mod tests {
 
         let opt = storage2.get("test2");
         assert_eq!(opt.unwrap().value, "foo2");
-        // let opt = storage2.get("test1");
-        // assert_eq!(opt.unwrap().as_ref(), "foo3");
 
-        // let opt = storage2.get("test2");
-        // assert_eq!(opt.unwrap().as_ref(), "foo2");
+        // Should have been deleted
+        let opt = storage2.get("test3");
+        println!("{:?}", opt);
+        assert!(opt.is_none());
     }
 }

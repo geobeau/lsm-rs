@@ -64,6 +64,7 @@ impl DiskTable {
             );
             let key =
                 std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
+
             meta.push(RecordMetadata {
                 data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
                 key_size,
@@ -81,20 +82,38 @@ impl DiskTable {
         self.fd.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         buf.extend((memtable.len() as u16).to_le_bytes());
-        memtable.iter().for_each(|r| {
-            offsets.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
-                key_size: r.key.len() as u16,
-                value_size: r.value.len() as u32,
-                timestamp: r.timestamp,
-                hash: r.hash,
-            });
-            self.count += 1;
-            buf.extend((r.key.len() as u16).to_le_bytes());
-            buf.extend((r.value.len() as u32).to_le_bytes());
-            buf.extend(r.timestamp.to_le_bytes());
-            buf.extend(r.key.as_bytes());
-            buf.extend(r.value.as_bytes());
+        memtable.iter().for_each(|e| {
+            match e {
+                super::MemtableEntry::Record(r) => {
+                    offsets.push(RecordMetadata {
+                        data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
+                        key_size: r.key.len() as u16,
+                        value_size: r.value.len() as u32,
+                        timestamp: r.timestamp,
+                        hash: r.hash,
+                    });
+                    self.count += 1;
+                    buf.extend((r.key.len() as u16).to_le_bytes());
+                    buf.extend((r.value.len() as u32).to_le_bytes());
+                    buf.extend(r.timestamp.to_le_bytes());
+                    buf.extend(r.key.as_bytes());
+                    buf.extend(r.value.as_bytes());
+                },
+                super::MemtableEntry::Tombstone(t) => {
+                    offsets.push(RecordMetadata {
+                        data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
+                        key_size: t.key.len() as u16,
+                        value_size: 0,
+                        timestamp: t.timestamp,
+                        hash: t.hash,
+                    });
+                    self.count += 1;
+                    buf.extend((t.key.len() as u16).to_le_bytes());
+                    buf.extend((0u32).to_le_bytes());
+                    buf.extend(t.timestamp.to_le_bytes());
+                    buf.extend(t.key.as_bytes());
+                },
+            };
         });
         self.fd.write_all(&buf).unwrap();
         memtable.len();
@@ -171,7 +190,7 @@ impl Manager {
                 .unwrap();
                 Record::new(key.to_string(), value.to_string())
             }
-            super::RecordPtr::MemTable(_) => panic!("Trying to query disk with a memtable pointer"),
+            _ => panic!("Trying to query disk with a non disk pointer"),
         }
     }
 
