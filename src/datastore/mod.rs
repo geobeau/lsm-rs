@@ -145,7 +145,7 @@ impl DataStore {
             .for_each(|meta| self.remove_reference_from_storage(meta));
     }
 
-    pub fn get_with_hash(&mut self, hash: HashedKey) -> Option<Record> {
+    pub fn get_with_hash(&self, hash: HashedKey) -> Option<Record> {
         let meta = match self.index.get(hash) {
             Some(meta) => meta,
             None => return None,
