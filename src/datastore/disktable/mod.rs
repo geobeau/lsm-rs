@@ -7,32 +7,40 @@ use std::{
     rc::Rc,
 };
 
-use crate::record::{hash_sha1, Record};
+use crate::{record::{hash_sha1, Record}};
 
 use super::{memtable::MemTable, RecordMetadata};
 
-// | metadata      |         data          |
-// |num_of_elements|entry|entry|entry|entry|
 
-// |                         entry                          |
-// |timestamp(u64le)|keysize(u16le)|valsize(u32le)|key|value|
-
-// Represent an on-disk table
+/// Represent an on-disk table
+/// 
+/// | metadata      |         data          |
+/// |num_of_elements|entry|entry|entry|entry|
+/// 
+/// |                         entry                          |
+/// |timestamp(u64le)|keysize(u16le)|valsize(u32le)|key|value|
 pub struct DiskTable {
     name: Rc<String>,
     path: PathBuf,
+    timestamp: u64,
+    /// Count the number of records physically within the disktables
     count: u16,
+    /// Count the number of references to disktable from the index
+    /// 0 means that the table is safe for deletion
     references: u16,
+    /// Mark the disktable for deletion
     deletion_marker: bool,
+    /// File descriptor of the table on disk
     fd: RefCell<File>,
 }
 
 impl DiskTable {
-    pub fn new(name: Rc<String>, path: PathBuf) -> DiskTable {
+    pub fn new(name: Rc<String>, path: PathBuf, timestamp: u64) -> DiskTable {
         let fd = File::options().create(true).read(true).write(true).open(path.clone()).unwrap();
         DiskTable {
             name,
             path,
+            timestamp,
             count: 0,
             references: 0,
             deletion_marker: false,
@@ -47,11 +55,16 @@ impl DiskTable {
         fd.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut count = [0u8; 2];
         fd.read_exact(&mut count).unwrap();
+        let mut timestamp_raw = [0u8; 8];
+        fd.read_exact(&mut timestamp_raw).unwrap();
+        let timestamp = u64::from_le_bytes(timestamp_raw);
+        crate::time::sync(timestamp);
 
         DiskTable {
             name,
             path,
             count: u16::from_le_bytes(count),
+            timestamp,
             references: 0,
             deletion_marker: false,
             fd: RefCell::from(fd),
@@ -89,8 +102,9 @@ impl DiskTable {
         let mut buf: Vec<u8> = Vec::new();
         self.fd.borrow_mut().read_to_end(&mut buf).unwrap();
         let count = u16::from_le_bytes(buf[0..2].try_into().expect("incorrect length"));
+        let _ = u64::from_le_bytes(buf[2..10].try_into().expect("incorrect length"));
         let mut meta = Vec::with_capacity(count as usize);
-        let mut cursor = 2;
+        let mut cursor = 10;
         for _ in 0..count {
             let key_size = u16::from_le_bytes(buf[cursor..cursor + 2].try_into().expect("incorrect length"));
             let value_size = u32::from_le_bytes(buf[cursor + 2..cursor + 6].try_into().expect("incorrect length"));
@@ -169,14 +183,20 @@ pub struct Manager {
     directory: PathBuf,
     // TODO: make tables private and implement iterator
     pub tables: HashMap<Rc<String>, DiskTable>,
+    pub oldest_table: u64,
 }
 
 impl Manager {
     pub fn new(directory: PathBuf) -> Manager {
         Manager {
+            oldest_table: crate::time::now(),
             directory,
             tables: HashMap::new(),
         }
+    }
+
+    fn refresh_oldest_table(&mut self) {
+        self.oldest_table = self.tables.values().map(|t| t.timestamp).min().unwrap_or_else(crate::time::now)
     }
 
     pub fn init(&mut self) {
@@ -186,7 +206,8 @@ impl Manager {
             let name = Rc::new(file.file_name().into_string().unwrap());
 
             self.tables.insert(name.clone(), DiskTable::new_from_disk(name, file.path()));
-        })
+        });
+        self.refresh_oldest_table();
     }
 
     pub fn truncate(&mut self) {
@@ -205,12 +226,14 @@ impl Manager {
     }
 
     pub fn flush_memtable(&mut self, memtable: &MemTable) -> Vec<RecordMetadata> {
-        let name = format!("{}-v1.data", crate::time::now());
+        let now = crate::time::now();
+        let name = format!("{}-v1.data", now);
         let mut file_path = self.directory.clone();
         file_path.push(&name);
-        let mut dt = DiskTable::new(Rc::new(name), file_path);
+        let mut dt = DiskTable::new(Rc::new(name), file_path, now);
         let offsets = dt.flush_from_memtable(memtable);
         self.tables.insert(dt.name.clone(), dt);
+        self.refresh_oldest_table();
         offsets
     }
 
