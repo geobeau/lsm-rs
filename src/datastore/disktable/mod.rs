@@ -85,7 +85,7 @@ impl DiskTable {
             let key = std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
 
             meta.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
+                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor as u32)),
                 key_size,
                 value_size,
                 hash: hash_sha1(key),
@@ -121,7 +121,7 @@ impl DiskTable {
                     value: value.to_string(),
                 },
                 RecordMetadata {
-                    data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
+                    data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor as u32)),
                     key_size,
                     value_size,
                     hash,
@@ -142,7 +142,7 @@ impl DiskTable {
         buf.extend(crate::time::now().to_le_bytes());
         memtable.iter().for_each(|r| {
             offsets.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
+                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len() as u32)),
                 key_size: r.key.len() as u16,
                 value_size: r.value.len() as u32,
                 timestamp: r.timestamp,
@@ -168,7 +168,7 @@ impl DiskTable {
         }
     }
 
-    fn get(&self, meta: &RecordMetadata, offset: usize) -> Record {
+    fn get(&self, meta: &RecordMetadata, offset: u32) -> Record {
         self.fd.borrow_mut().seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
         let mut buf = vec![0u8; meta.size_of()];
         self.fd.borrow_mut().read_exact(&mut buf).unwrap();

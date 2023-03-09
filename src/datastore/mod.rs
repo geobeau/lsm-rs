@@ -28,8 +28,8 @@ impl RecordMetadata {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordPtr {
-    DiskTable((Rc<String>, usize)),
-    Compacting((Rc<String>, usize)),
+    DiskTable((Rc<String>, u32)),
+    Compacting((Rc<String>, u32)),
     MemTable(()),
 }
 
@@ -221,6 +221,10 @@ impl DataStore {
                     if meta.timestamp.lt(&in_index_meta.timestamp) {
                         return Some(meta);
                     }
+                }
+                if meta.is_tombstone() && meta.timestamp < self.table_manager.oldest_table {
+                    self.index.delete(&meta);
+                    return None
                 }
                 if let RecordPtr::DiskTable((t, o)) = meta.data_ptr {
                     meta.data_ptr = RecordPtr::Compacting((t, o))
