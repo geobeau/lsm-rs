@@ -77,7 +77,7 @@ impl DiskTable {
         self.fd.borrow_mut().read_to_end(&mut buf).unwrap();
         let count = u16::from_le_bytes(buf[0..2].try_into().expect("incorrect length"));
         let mut meta = Vec::with_capacity(count as usize);
-        let mut cursor = 2;
+        let mut cursor = 10;
         for _ in 0..count {
             let key_size = u16::from_le_bytes(buf[cursor..cursor + 2].try_into().expect("incorrect length"));
             let value_size = u32::from_le_bytes(buf[cursor + 2..cursor + 6].try_into().expect("incorrect length"));
