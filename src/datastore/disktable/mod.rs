@@ -139,6 +139,7 @@ impl DiskTable {
         self.fd.borrow_mut().seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         buf.extend((memtable.len() as u16).to_le_bytes());
+        buf.extend(crate::time::now().to_le_bytes());
         memtable.iter().for_each(|r| {
             offsets.push(RecordMetadata {
                 data_ptr: super::RecordPtr::DiskTable((self.name.clone(), buf.len())),
