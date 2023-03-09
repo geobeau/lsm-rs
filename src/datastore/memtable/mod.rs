@@ -7,7 +7,7 @@ pub struct MemTable {
     /// Number of references on it from the index
     pub references: usize,
     /// Number of bytes of data added to it
-    bytes: usize,
+    pub bytes: usize,
 }
 
 impl MemTable {
@@ -34,6 +34,10 @@ impl MemTable {
 
     pub fn len(&self) -> usize {
         self.buffer.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
 
     pub fn references(&self) -> usize {

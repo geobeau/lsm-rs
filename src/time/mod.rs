@@ -14,13 +14,7 @@ thread_local! {
 pub fn now() -> u64 {
     OLD_NOW.with(|x| {
         let mut val = x.get();
-        val = max(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64,
-            val + 1,
-        );
+        val = max(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64, val + 1);
         x.set(val);
         x.get()
     })

@@ -29,12 +29,7 @@ pub struct DiskTable {
 
 impl DiskTable {
     pub fn new(name: Rc<String>, path: PathBuf) -> DiskTable {
-        let fd = File::options()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(path.clone())
-            .unwrap();
+        let fd = File::options().create(true).read(true).write(true).open(path.clone()).unwrap();
         DiskTable {
             name,
             path,
@@ -48,11 +43,7 @@ impl DiskTable {
     /// Initialize a disktable from an already existing table
     pub fn new_from_disk(name: Rc<String>, path: PathBuf) -> DiskTable {
         // Open the file and read its disktable metadata
-        let mut fd = File::options()
-            .read(true)
-            .write(true)
-            .open(path.clone())
-            .unwrap();
+        let mut fd = File::options().read(true).write(true).open(path.clone()).unwrap();
         fd.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut count = [0u8; 2];
         fd.read_exact(&mut count).unwrap();
@@ -68,33 +59,17 @@ impl DiskTable {
     }
 
     pub fn read_all_metadata(&mut self) -> Vec<RecordMetadata> {
-        self.fd
-            .borrow_mut()
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        self.fd.borrow_mut().seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         self.fd.borrow_mut().read_to_end(&mut buf).unwrap();
         let count = u16::from_le_bytes(buf[0..2].try_into().expect("incorrect length"));
         let mut meta = Vec::with_capacity(count as usize);
         let mut cursor = 2;
         for _ in 0..count {
-            let key_size = u16::from_le_bytes(
-                buf[cursor..cursor + 2]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let value_size = u32::from_le_bytes(
-                buf[cursor + 2..cursor + 6]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let timestamp = u64::from_le_bytes(
-                buf[cursor + 6..cursor + 14]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let key =
-                std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
+            let key_size = u16::from_le_bytes(buf[cursor..cursor + 2].try_into().expect("incorrect length"));
+            let value_size = u32::from_le_bytes(buf[cursor + 2..cursor + 6].try_into().expect("incorrect length"));
+            let timestamp = u64::from_le_bytes(buf[cursor + 6..cursor + 14].try_into().expect("incorrect length"));
+            let key = std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
 
             meta.push(RecordMetadata {
                 data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor)),
@@ -110,38 +85,18 @@ impl DiskTable {
     }
 
     pub fn read_all_data(&mut self) -> Vec<(Record, RecordMetadata)> {
-        self.fd
-            .borrow_mut()
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        self.fd.borrow_mut().seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         self.fd.borrow_mut().read_to_end(&mut buf).unwrap();
         let count = u16::from_le_bytes(buf[0..2].try_into().expect("incorrect length"));
         let mut meta = Vec::with_capacity(count as usize);
         let mut cursor = 2;
         for _ in 0..count {
-            let key_size = u16::from_le_bytes(
-                buf[cursor..cursor + 2]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let value_size = u32::from_le_bytes(
-                buf[cursor + 2..cursor + 6]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let timestamp = u64::from_le_bytes(
-                buf[cursor + 6..cursor + 14]
-                    .try_into()
-                    .expect("incorrect length"),
-            );
-            let key =
-                std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
-            let value = std::str::from_utf8(
-                &buf[cursor + 14 + key_size as usize
-                    ..cursor + 14 + key_size as usize + value_size as usize],
-            )
-            .unwrap();
+            let key_size = u16::from_le_bytes(buf[cursor..cursor + 2].try_into().expect("incorrect length"));
+            let value_size = u32::from_le_bytes(buf[cursor + 2..cursor + 6].try_into().expect("incorrect length"));
+            let timestamp = u64::from_le_bytes(buf[cursor + 6..cursor + 14].try_into().expect("incorrect length"));
+            let key = std::str::from_utf8(&buf[cursor + 14..cursor + 14 + key_size as usize]).unwrap();
+            let value = std::str::from_utf8(&buf[cursor + 14 + key_size as usize..cursor + 14 + key_size as usize + value_size as usize]).unwrap();
 
             let hash = hash_sha1(key);
             meta.push((
@@ -167,10 +122,7 @@ impl DiskTable {
 
     pub fn flush_from_memtable(&mut self, memtable: &MemTable) -> Vec<RecordMetadata> {
         let mut offsets = Vec::new();
-        self.fd
-            .borrow_mut()
-            .seek(std::io::SeekFrom::Start(0))
-            .unwrap();
+        self.fd.borrow_mut().seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         buf.extend((memtable.len() as u16).to_le_bytes());
         memtable.iter().for_each(|r| {
@@ -202,19 +154,12 @@ impl DiskTable {
     }
 
     fn get(&self, meta: &RecordMetadata, offset: usize) -> Record {
-        self.fd
-            .borrow_mut()
-            .seek(std::io::SeekFrom::Start(offset as u64))
-            .unwrap();
+        self.fd.borrow_mut().seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
         let mut buf = vec![0u8; meta.size_of()];
         self.fd.borrow_mut().read_exact(&mut buf).unwrap();
         let timestamp = u64::from_le_bytes(buf[6..14].try_into().expect("incorrect length"));
         let key = std::str::from_utf8(&buf[14..14 + meta.key_size as usize]).unwrap();
-        let value = std::str::from_utf8(
-            &buf[14 + meta.key_size as usize
-                ..14 + meta.key_size as usize + meta.value_size as usize],
-        )
-        .unwrap();
+        let value = std::str::from_utf8(&buf[14 + meta.key_size as usize..14 + meta.key_size as usize + meta.value_size as usize]).unwrap();
 
         Record::new_with_timestamp(key.to_string(), value.to_string(), timestamp)
     }
@@ -240,8 +185,7 @@ impl Manager {
             let file = result.unwrap();
             let name = Rc::new(file.file_name().into_string().unwrap());
 
-            self.tables
-                .insert(name.clone(), DiskTable::new_from_disk(name, file.path()));
+            self.tables.insert(name.clone(), DiskTable::new_from_disk(name, file.path()));
         })
     }
 
@@ -275,33 +219,22 @@ impl Manager {
     }
 
     pub fn get_disktables_marked_for_deletion(&self) -> Vec<Rc<String>> {
-        self.tables
-            .iter()
-            .filter(|(_, t)| t.deletion_marker)
-            .map(|(n, _)| n)
-            .cloned()
-            .collect()
+        self.tables.iter().filter(|(_, t)| t.deletion_marker).map(|(n, _)| n).cloned().collect()
     }
 
     pub fn delete_disktables_marked_for_deletion(&mut self) {
-        self.get_disktables_marked_for_deletion()
-            .iter()
-            .for_each(|t| {
-                let table = self.tables.get(t).unwrap();
-                std::fs::remove_file(&table.path).unwrap();
-                self.tables.remove(t);
-            });
+        self.get_disktables_marked_for_deletion().iter().for_each(|t| {
+            let table = self.tables.get(t).unwrap();
+            std::fs::remove_file(&table.path).unwrap();
+            self.tables.remove(t);
+        });
     }
 
     pub fn references(&self) -> usize {
-        self.tables
-            .iter()
-            .fold(0, |size, t| size + t.1.references as usize)
+        self.tables.iter().fold(0, |size, t| size + t.1.references as usize)
     }
 
     pub fn len(&self) -> usize {
-        self.tables
-            .iter()
-            .fold(0, |size, t| size + t.1.count as usize)
+        self.tables.iter().fold(0, |size, t| size + t.1.count as usize)
     }
 }

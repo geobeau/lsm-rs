@@ -37,6 +37,7 @@ pub struct DataStore {
     index: index::Index,
     memtable: memtable::MemTable,
     table_manager: disktable::Manager,
+    config: Config,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,24 @@ pub struct Tombstone {
 impl Tombstone {
     pub fn size_of(&self) -> usize {
         2 + 4 + 8 + self.key.len()
+    }
+}
+
+pub struct Config {
+    /// Number of bytes that can be stored in a given memtable before
+    /// flushing to disktable
+    memtable_max_size_bytes: usize,
+    /// Ratio of in-use data in a disktable, going underneath will compact
+    /// the table
+    disktable_target_usage_ratio: f32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            memtable_max_size_bytes: 4096, // Should be much higher for a real db
+            disktable_target_usage_ratio: 0.7,
+        }
     }
 }
 
@@ -79,6 +98,7 @@ impl DataStore {
             index: index::Index::new(),
             memtable: memtable::MemTable::new(),
             table_manager: disktable::Manager::new(directory),
+            config: Config::default(),
         }
     }
 
@@ -112,6 +132,11 @@ impl DataStore {
         let key_size = r.key.len() as u16;
         let value_size = r.value.len() as u32;
         let timestamp = r.timestamp;
+
+        if !self.memtable.is_empty() && self.memtable.bytes + r.size_of() > self.config.memtable_max_size_bytes {
+            self.force_flush()
+        }
+
         self.memtable.append(r);
 
         let meta = RecordMetadata {
@@ -140,9 +165,7 @@ impl DataStore {
             .filter_map(|meta| self.index.update(meta))
             .collect();
 
-        meta_to_update
-            .iter()
-            .for_each(|meta| self.remove_reference_from_storage(meta));
+        meta_to_update.iter().for_each(|meta| self.remove_reference_from_storage(meta));
     }
 
     pub fn get_with_hash(&self, hash: HashedKey) -> Option<Record> {
@@ -162,30 +185,22 @@ impl DataStore {
 
     pub fn force_flush(&mut self) {
         let offsets = self.table_manager.flush_memtable(&self.memtable);
-        println!("OUGO BOUGA");
-        println!("before: {:?}", self.index);
         let meta_to_update: Vec<RecordMetadata> = offsets
             .into_iter()
             // Update the index
             .filter_map(|m| self.index.update(m))
             .collect();
-        println!("need to update old: {:?}", self.get_stats());
-        println!("need to update old: {:?}", meta_to_update);
         meta_to_update
             .iter()
             // Make sure the references are correctly handled
             .for_each(|old_meta| self.remove_reference_from_storage(old_meta));
-        println!("{:?}", self.get_stats());
-        println!("{:?}", self.index);
         assert!(self.memtable.references == 0);
         self.memtable.truncate();
     }
 
     fn remove_reference_from_storage(&mut self, meta: &RecordMetadata) {
         match &meta.data_ptr {
-            RecordPtr::DiskTable((table, _)) => {
-                self.table_manager.remove_reference_from_storage(table)
-            }
+            RecordPtr::DiskTable((table, _)) => self.table_manager.remove_reference_from_storage(table),
             RecordPtr::MemTable(_) => self.memtable.references -= 1,
             RecordPtr::Compacting((table, _)) => {
                 self.table_manager.remove_reference_from_storage(table);
@@ -215,9 +230,7 @@ impl DataStore {
             })
             .collect();
 
-        meta_to_update
-            .iter()
-            .for_each(|meta| self.remove_reference_from_storage(meta));
+        meta_to_update.iter().for_each(|meta| self.remove_reference_from_storage(meta));
     }
 
     /// Return number of active records from memtable/index
@@ -237,7 +250,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_datastore() {
+    fn test_datastore_for_consistency() {
         let mut storage = DataStore::new(PathBuf::from(r"./data/"));
         storage.init();
         storage.truncate();
@@ -308,24 +321,10 @@ mod tests {
         println!("{:?}", storage2.get_stats());
         storage2.reclaim_all_disktables();
         println!("{:?}", storage2.get_stats());
-        assert_eq!(
-            storage2
-                .table_manager
-                .get_disktables_marked_for_deletion()
-                .len(),
-            0
-        );
+        assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 0);
         storage2.force_flush();
-        assert_eq!(
-            storage2
-                .table_manager
-                .get_disktables_marked_for_deletion()
-                .len(),
-            2
-        );
-        storage2
-            .table_manager
-            .delete_disktables_marked_for_deletion();
+        assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 2);
+        storage2.table_manager.delete_disktables_marked_for_deletion();
         storage2.get_stats().assert_not_corrupted();
 
         let opt = storage.get("test1");
@@ -336,5 +335,10 @@ mod tests {
 
         let opt = storage2.get("test3");
         assert!(opt.is_none());
+    }
+
+    #[test]
+    fn test_datastore_for_flush_and_compactions() {
+        // TODO
     }
 }

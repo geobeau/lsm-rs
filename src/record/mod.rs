@@ -28,12 +28,7 @@ impl Record {
 
     pub fn new_with_timestamp(key: String, value: String, timestamp: u64) -> Record {
         let hash = hash_sha1(&key);
-        Record {
-            key,
-            value,
-            hash,
-            timestamp,
-        }
+        Record { key, value, hash, timestamp }
     }
 
     pub fn size_of(&self) -> usize {
