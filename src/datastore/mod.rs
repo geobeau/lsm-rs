@@ -110,7 +110,7 @@ impl DataStore {
             index: index::Index::new(),
             memtable: memtable::MemTable::new(),
             table_manager: disktable::Manager::new(directory),
-            config: config,
+            config,
         }
     }
 
