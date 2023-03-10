@@ -55,13 +55,14 @@ impl Tombstone {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Config {
     /// Number of bytes that can be stored in a given memtable before
     /// flushing to disktable
-    memtable_max_size_bytes: usize,
+    pub memtable_max_size_bytes: usize,
     /// Ratio of in-use data in a disktable, going underneath will compact
     /// the table
-    disktable_target_usage_ratio: f32,
+    pub disktable_target_usage_ratio: f32,
 }
 
 impl Default for Config {
@@ -98,11 +99,18 @@ impl Stats {
 
 impl DataStore {
     pub fn new(directory: PathBuf) -> DataStore {
+        DataStore::new_with_config(directory, Config::default())
+    }
+
+    pub fn new_with_config(directory: PathBuf, config: Config) -> DataStore {
+        if !directory.exists() {
+            std::fs::create_dir_all(directory.clone()).unwrap();
+        }
         DataStore {
             index: index::Index::new(),
             memtable: memtable::MemTable::new(),
             table_manager: disktable::Manager::new(directory),
-            config: Config::default(),
+            config: config,
         }
     }
 
@@ -275,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_datastore_for_consistency() {
-        let mut storage = DataStore::new(PathBuf::from(r"./data/"));
+        let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency"));
         storage.init();
         storage.truncate();
         let opt = storage.get("test");
@@ -320,7 +328,7 @@ mod tests {
         let opt = storage.get("test1");
         assert_eq!(opt.unwrap().value, "foo3");
 
-        let mut storage2 = DataStore::new(PathBuf::from(r"./data/"));
+        let mut storage2 = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency"));
         storage2.init();
         storage2.get_stats().assert_not_corrupted();
 
@@ -366,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_datastore_for_flush_and_compactions() {
-        let mut storage = DataStore::new(PathBuf::from(r"./data/"));
+        let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_flush_and_compactions"));
         storage.init();
         storage.truncate();
 

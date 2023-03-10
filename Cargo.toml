@@ -7,3 +7,15 @@ edition = "2021"
 
 [dependencies]
 rust-crypto = "0.2.36"
+
+[dev-dependencies]
+criterion = "0.4.0"
+rand = "0.8.5"
+
+[profile.dev]
+opt-level = 2
+
+[[bench]]
+name = "kvs"
+harness = false
+opt-level = 2
