@@ -34,9 +34,7 @@ pub fn kvs_insert_dataset_benchmark(c: &mut Criterion) {
     };
     let mut d = datastore::DataStore::new_with_config(PathBuf::from("./data/bench/"), config.clone());
     d.truncate();
-    c.bench_function("kvs: insert, 4kiB tables", |b| b.iter(|| {
-        d.set(Record::new(gen_string(), gen_string()))
-    }));
+    c.bench_function("kvs: insert, 4kiB tables", |b| b.iter(|| d.set(Record::new(gen_string(), gen_string()))));
 }
 
 fn gen_string() -> String {
@@ -55,11 +53,9 @@ fn gen_dataset(n: usize) -> Vec<(String, String)> {
 fn kvs_insert(dataset: &[(String, String)], conf: &Config) {
     let mut s = datastore::DataStore::new_with_config(PathBuf::from("./data/bench/"), conf.clone());
 
-    dataset
-        .iter()
-        .for_each(|(key, value)| s.set(Record::new(key.clone(), value.clone())));
+    dataset.iter().for_each(|(key, value)| s.set(Record::new(key.clone(), value.clone())));
 
-    s.truncate();
+    s.await.truncate();
 }
 
 // criterion_group!(benches, kvs_big_dataset_benchmark, kvs_insert_dataset_benchmark);

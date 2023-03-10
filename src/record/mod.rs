@@ -12,6 +12,16 @@ pub fn hash_sha1(key: &str) -> HashedKey {
     hashed_key
 }
 
+pub fn hash_sha1_bytes(key: &[u8]) -> HashedKey {
+    let mut hasher = Sha1::new();
+    let mut hashed_key: HashedKey = [0; 20];
+
+    hasher.input(key);
+    hasher.result(&mut hashed_key);
+
+    hashed_key
+}
+
 #[derive(Debug, Clone)]
 pub struct Record {
     pub key: String,
