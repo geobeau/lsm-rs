@@ -1,4 +1,7 @@
-use std::collections::{HashMap, hash_map::Entry::{Vacant, Occupied}};
+use std::collections::{
+    hash_map::Entry::{Occupied, Vacant},
+    HashMap,
+};
 
 use super::{HashedKey, RecordMetadata};
 
@@ -9,9 +12,7 @@ pub struct Index {
 
 impl Index {
     pub fn new() -> Index {
-        Index {
-            kvs: HashMap::new(),
-        }
+        Index { kvs: HashMap::new() }
     }
 
     /// Update the index with new metadata
@@ -35,7 +36,7 @@ impl Index {
     }
 
     pub fn delete(&mut self, meta: &RecordMetadata) {
-        self.kvs.remove(&meta.hash); 
+        self.kvs.remove(&meta.hash);
     }
 
     pub fn get(&self, hash: HashedKey) -> Option<&RecordMetadata> {

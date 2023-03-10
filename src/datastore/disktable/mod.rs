@@ -7,16 +7,15 @@ use std::{
     rc::Rc,
 };
 
-use crate::{record::{hash_sha1, Record}};
+use crate::record::{hash_sha1, Record};
 
 use super::{memtable::MemTable, RecordMetadata};
 
-
 /// Represent an on-disk table
-/// 
+///
 /// | metadata      |         data          |
 /// |num_of_elements|entry|entry|entry|entry|
-/// 
+///
 /// |                         entry                          |
 /// |timestamp(u64le)|keysize(u16le)|valsize(u32le)|key|value|
 pub struct DiskTable {
@@ -32,6 +31,11 @@ pub struct DiskTable {
     deletion_marker: bool,
     /// File descriptor of the table on disk
     fd: RefCell<File>,
+}
+
+#[derive(Debug)]
+pub struct DiskTableStats {
+    pub usage_ratio: f32,
 }
 
 impl DiskTable {
@@ -178,6 +182,16 @@ impl DiskTable {
 
         Record::new_with_timestamp(key.to_string(), value.to_string(), timestamp)
     }
+
+    pub fn get_usage_ratio(&self) -> f32 {
+        self.references as f32 / self.count as f32
+    }
+
+    pub fn get_stats(&self) -> DiskTableStats {
+        DiskTableStats {
+            usage_ratio: self.get_usage_ratio(),
+        }
+    }
 }
 
 pub struct Manager {
@@ -185,6 +199,11 @@ pub struct Manager {
     // TODO: make tables private and implement iterator
     pub tables: HashMap<Rc<String>, DiskTable>,
     pub oldest_table: u64,
+}
+
+#[derive(Debug)]
+pub struct ManagerStats {
+    pub table_stats: Vec<(Rc<String>, DiskTableStats)>,
 }
 
 impl Manager {
@@ -260,5 +279,20 @@ impl Manager {
 
     pub fn len(&self) -> usize {
         self.tables.iter().fold(0, |size, t| size + t.1.count as usize)
+    }
+
+    pub fn get_stats(&self) -> ManagerStats {
+        ManagerStats {
+            table_stats: self.tables.iter().map(|(n, t)| (n.clone(), t.get_stats())).collect(),
+        }
+    }
+
+    pub fn get_best_table_to_reclaim(&self) -> Option<Rc<String>> {
+        // TODO: Make ratio configurable
+        let target_ratio = 0.7;
+        self.tables
+            .iter()
+            .find(|(_n, t)| t.get_usage_ratio() < target_ratio)
+            .map(|(n, _)| n.clone())
     }
 }

@@ -2,6 +2,8 @@ use std::{hash::Hash, path::PathBuf, rc::Rc};
 
 use crate::record::{self, hash_sha1, HashedKey, Record};
 
+use self::disktable::ManagerStats;
+
 pub mod disktable;
 pub mod index;
 pub mod memtable;
@@ -80,6 +82,8 @@ pub struct Stats {
     memtable_refs: usize,
     /// Number of records in the disktables
     disktable_refs: usize,
+    /// Stats from the disktable manager
+    disktable_manager_stats: ManagerStats,
     /// Total number of records inside the table
     /// Should be >= index_refs
     all_records: usize,
@@ -184,6 +188,9 @@ impl DataStore {
     }
 
     pub fn force_flush(&mut self) {
+        if self.memtable.is_empty() {
+            return;
+        }
         let offsets = self.table_manager.flush_memtable(&self.memtable);
         let meta_to_update: Vec<RecordMetadata> = offsets
             .into_iter()
@@ -209,12 +216,12 @@ impl DataStore {
         };
     }
 
-    pub fn reclaim_all_disktables(&mut self) {
-        let meta_to_update: Vec<RecordMetadata> = self
-            .table_manager
-            .tables
-            .iter_mut()
-            .flat_map(|(_, t)| t.read_all_data())
+    fn reclaim_disktable(&mut self, n: &Rc<String>) {
+        let t = self.table_manager.tables.get_mut(n).unwrap();
+        // TODO datastore should not access tables directly
+        let meta_to_update: Vec<RecordMetadata> = t
+            .read_all_data()
+            .into_iter()
             .filter_map(|(record, mut meta)| {
                 if let Some(in_index_meta) = self.index.get(meta.hash) {
                     // Skip record if one is newer in memory
@@ -224,7 +231,7 @@ impl DataStore {
                 }
                 if meta.is_tombstone() && meta.timestamp < self.table_manager.oldest_table {
                     self.index.delete(&meta);
-                    return None
+                    return None;
                 }
                 if let RecordPtr::DiskTable((t, o)) = meta.data_ptr {
                     meta.data_ptr = RecordPtr::Compacting((t, o))
@@ -237,12 +244,25 @@ impl DataStore {
         meta_to_update.iter().for_each(|meta| self.remove_reference_from_storage(meta));
     }
 
+    pub fn maybe_run_one_reclaim(&mut self) {
+        if let Some(n) = self.table_manager.get_best_table_to_reclaim() {
+            self.reclaim_disktable(&n);
+        }
+    }
+
+    pub fn reclaim_all_disktables(&mut self) {
+        let tables: Vec<Rc<String>> = self.table_manager.tables.iter_mut().map(|(n, _)| n).cloned().collect();
+
+        tables.iter().for_each(|n| self.reclaim_disktable(n));
+    }
+
     /// Return number of active records from memtable/index
     pub fn get_stats(&self) -> Stats {
         Stats {
             index_len: self.index.len(),
             memtable_refs: self.memtable.references(),
             disktable_refs: self.table_manager.references(),
+            disktable_manager_stats: self.table_manager.get_stats(),
             all_records: self.memtable.len() + self.table_manager.len(),
         }
     }
@@ -295,6 +315,7 @@ mod tests {
         storage.get_stats().assert_not_corrupted();
         storage.force_flush();
         storage.get_stats().assert_not_corrupted();
+        println!("{:?}", storage.get_stats());
 
         let opt = storage.get("test1");
         assert_eq!(opt.unwrap().value, "foo3");
@@ -339,10 +360,61 @@ mod tests {
 
         let opt = storage2.get("test3");
         assert!(opt.is_none());
+
+        println!("{:?}", storage.get_stats());
     }
 
     #[test]
     fn test_datastore_for_flush_and_compactions() {
-        // TODO
+        let mut storage = DataStore::new(PathBuf::from(r"./data/"));
+        storage.init();
+        storage.truncate();
+
+        storage.set(Record::new("test1".to_string(), "foo1".to_string()));
+        storage.set(Record::new("test2".to_string(), "foo2".to_string()));
+        storage.set(Record::new("test3".to_string(), "foo3".to_string()));
+        storage.set(Record::new("test4".to_string(), "foo4".to_string()));
+        storage.set(Record::new("test5".to_string(), "foo5".to_string()));
+        storage.force_flush();
+
+        storage.get_stats().assert_not_corrupted();
+
+        // Try to flush empty memtable: should not add a new disktable
+        storage.force_flush();
+        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+
+        // Reclaiming with only one table doesn't do anything
+        storage.maybe_run_one_reclaim();
+        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+
+        storage.set(Record::new("test6".to_string(), "foo6".to_string()));
+        storage.set(Record::new("test7".to_string(), "foo7".to_string()));
+        storage.force_flush();
+        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+
+        println!("{:?}", storage.get_stats());
+        // No reason to make a compaction
+        storage.maybe_run_one_reclaim();
+        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+        storage.set(Record::new("test3".to_string(), "foo31".to_string()));
+        storage.set(Record::new("test4".to_string(), "foo41".to_string()));
+
+        storage.maybe_run_one_reclaim();
+        storage.force_flush();
+        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
+        storage.table_manager.delete_disktables_marked_for_deletion();
+        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+
+        // if we delete all data in a disktable, it should be ready for deletion
+        storage.delete("test6");
+        storage.delete("test7");
+        storage.force_flush();
+        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
+        storage.table_manager.delete_disktables_marked_for_deletion();
+
+        storage.reclaim_all_disktables();
+        storage.force_flush();
+        storage.table_manager.delete_disktables_marked_for_deletion();
+        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
     }
 }
