@@ -6,5 +6,6 @@ fn main() {
     ex.run(async move {
         let mut s = DataStore::new("./data/".into()).await;
         s.set(Record::new("test".to_string(), "test".to_string()));
+        println!("{:?}", s.get("test").await.unwrap());
     });
 }
