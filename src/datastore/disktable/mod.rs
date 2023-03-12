@@ -151,9 +151,9 @@ impl DiskTable {
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
 
             let mut key = vec![0u8; key_size as usize];
-            stream.read_exact(&mut key);
+            stream.read_exact(&mut key).await.unwrap();
             let value = vec![0u8; value_size as usize];
-            stream.read_exact(&mut key);
+            stream.read_exact(&mut key).await.unwrap();
 
             let hash = hash_sha1_bytes(&key);
 
@@ -248,9 +248,7 @@ impl Manager {
 
     pub async fn get(&self, meta: &RecordMetadata) -> Record {
         match &meta.data_ptr {
-            super::RecordPtr::DiskTable((table_name, offset)) => {
-                self.tables.get(table_name).unwrap().get(meta, *offset).await
-            }
+            super::RecordPtr::DiskTable((table_name, offset)) => self.tables.get(table_name).unwrap().get(meta, *offset).await,
             _ => panic!("Trying to query disk with a non disk pointer"),
         }
     }
