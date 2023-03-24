@@ -34,4 +34,20 @@ So it will probably evolve to a btreemap.
 
 ### Memtable & Disktable
 
+#### Memtable
 
+All writes are added to the memtable. This memtable is flushed to disk once it's full. It is flushed as a disktable
+In future version, it will be flushed at regular interval.
+
+The current underlying datastructure is a hashmap to have a very easy way to handle updates (when a record is updated but
+not yet flushed to disktable, we can juste replace it and same some ressources). 
+
+#### Disktable 
+
+Disktable is a file containing the records. It is not sorted (hence not an SSTable).
+
+#### Compaction/Reclaim
+
+Disktable are reference counted, once they go under a certain ratio, they are marked for Reclamation. References are decremented
+everytime we update a record (in a new disktable), delete a record and expire a record.
+Reclamation read the full disktable, keep only in-use data and append the remaining data to the memtable.
