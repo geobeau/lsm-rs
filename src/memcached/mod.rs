@@ -1,7 +1,10 @@
+use futures::{AsyncReadExt};
 use std::io::Read;
 
-use byteorder::{LittleEndian, ReadBytesExt};
 
+use glommio::net::TcpStream;
+
+#[derive(Debug, Clone)]
 pub enum Command {
     Set(Set),
     Get(Get),
@@ -38,6 +41,7 @@ pub enum Command {
 const GET: u8 = 0u8;
 const SET: u8 = 1u8;
 
+#[derive(Debug, Clone)]
 pub struct Set {
     key: String,
     flags: u32,
@@ -45,19 +49,27 @@ pub struct Set {
     data: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Get {
     key: String,
 }
 
+#[derive(Debug)]
 struct Header {
     magic: u8,
     opcode: u8,
     key_size: u16,
     extra_size: u8,
     status: u8,
-    value_size: u32,
+    body_length: u32,
     opaque: u32,
     cas: u64,
+}
+
+impl Header {
+    fn get_data_length(&self) -> usize {
+        self.body_length as usize - self.key_size as usize - self.extra_size as usize
+    }
 }
 
 // pub struct MemcachedAsciiHandler {
@@ -77,11 +89,11 @@ struct Header {
 //         cmd_iter.next().unwrap();
 
 //         let flags_end = cmd_iter.position(|c| *c == SPACE).unwrap();
-//         let flags = u16::from_le_bytes(command[key_end+1..flags_end].try_into().unwrap());
+//         let flags = u16::from_be_bytes(command[key_end+1..flags_end].try_into().unwrap());
 //         cmd_iter.next().unwrap();
 
 //         let exptime_end = cmd_iter.position(|c| *c == SPACE).unwrap();
-//         let exptime = u64::from_le_bytes(command[flags_end+1..exptime_end].try_into().unwrap());
+//         let exptime = u64::from_be_bytes(command[flags_end+1..exptime_end].try_into().unwrap());
 
 //         let data = command[exptime_end+1..command.len()-4].to_vec();
 //         Some(Set { key, flags, exptime, data })
@@ -129,61 +141,77 @@ struct Header {
 // Data type           Reserved for future use (Sean is using this soon).
 
 pub struct MemcachedBinaryHandler {
-    reader: dyn Read,
+    pub reader: TcpStream,
 }
 
 impl MemcachedBinaryHandler {
-    fn parse_header(&self, header_bytes: &[u8]) -> Header {
-        return Header {
+    async fn parse_header(&self, header_bytes: &[u8]) -> Header {
+        println!("{:?}", header_bytes);
+        Header {
             magic: header_bytes[0],
             opcode: header_bytes[1],
-            key_size: u16::from_le_bytes(header_bytes[2..4].try_into().unwrap()),
+            key_size: u16::from_be_bytes(header_bytes[2..4].try_into().unwrap()),
             extra_size: header_bytes[4],
             status: header_bytes[5],
-            value_size: u32::from_le_bytes(header_bytes[8..12].try_into().unwrap()),
-            opaque: u32::from_le_bytes(header_bytes[12..16].try_into().unwrap()),
-            cas: u64::from_le_bytes(header_bytes[16..24].try_into().unwrap()),
-        };
+            body_length: u32::from_be_bytes(header_bytes[8..12].try_into().unwrap()),
+            opaque: u32::from_be_bytes(header_bytes[12..16].try_into().unwrap()),
+            cas: u64::from_be_bytes(header_bytes[16..24].try_into().unwrap()),
+        }
     }
 
-    fn parse_set(&mut self, header: &Header) -> Option<Set> {
+    async fn parse_set(&mut self, header: &Header) -> Option<Set> {
         assert_eq!(header.extra_size, 8u8);
 
-        let flags = self.reader.read_u32::<LittleEndian>().unwrap();
-        let exptime = self.reader.read_u32::<LittleEndian>().unwrap();
+        let mut extra_buf = [0u8; 8];
+        self.reader.read_exact(&mut extra_buf).await.unwrap();
+        let flags = u32::from_be_bytes(extra_buf[0..4].try_into().unwrap());
+        let exptime = u32::from_be_bytes(extra_buf[4..8].try_into().unwrap());
 
         let mut key_bytes = vec![0u8; header.key_size as usize];
-        let mut data = vec![0u8; header.value_size as usize];
-        self.reader.read_exact(&mut key_bytes).unwrap();
-        self.reader.read_exact(&mut data).unwrap();
+        let mut data = vec![0u8; header.get_data_length()];
+
+        self.reader.read_exact(&mut key_bytes).await.unwrap();
+        self.reader.read_exact(&mut data).await.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Set { key, flags, exptime, data })
     }
 
-    fn parse_get(&mut self, header: &Header) -> Option<Get> {
+    async fn parse_get(&mut self, header: &Header) -> Option<Get> {
         assert_eq!(header.extra_size, 0u8);
 
         let mut key_bytes = vec![0u8; header.key_size as usize];
-        self.reader.read_exact(&mut key_bytes).unwrap();
+        self.reader.read_exact(&mut key_bytes).await.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Get { key })
     }
-}
-
-impl Iterator for MemcachedBinaryHandler {
-    type Item = Command;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub async fn decode_command(&mut self) -> Option<Command> {
         let mut header_buff = [0u8; 24];
-        self.reader.read_exact(&mut header_buff).unwrap();
-        let header = self.parse_header(&header_buff);
-
+        self.reader.read_exact(&mut header_buff).await.unwrap();
+        let header = self.parse_header(&header_buff).await;
+        println!("{:?}", header);
+        println!("{:?}", header.get_data_length());
         match header.opcode {
-            SET => Some(Command::Set(self.parse_set(&header).unwrap())),
-            GET => Some(Command::Get(self.parse_get(&header).unwrap())),
+            SET => Some(Command::Set(self.parse_set(&header).await.unwrap())),
+            GET => Some(Command::Get(self.parse_get(&header).await.unwrap())),
             _ => todo!(),
         }
     }
 }
+
+// impl Iterator for MemcachedBinaryHandler {
+//     type Item = Command;
+
+//     fn get_command(&mut self) -> Option<Self::Item> {
+//         let mut header_buff = [0u8; 24];
+//         self.reader.read_exact(&mut header_buff).unwrap();
+//         let header = self.parse_header(&header_buff);
+
+//         match header.opcode {
+//             SET => Some(Command::Set(self.parse_set(&header).unwrap())),
+//             GET => Some(Command::Get(self.parse_get(&header).unwrap())),
+//             _ => todo!(),
+//         }
+//     }
+// }
