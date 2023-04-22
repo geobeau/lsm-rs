@@ -63,9 +63,9 @@ impl DiskTable {
             buf.extend((r.value.len() as u32).to_le_bytes());
             buf.extend(r.timestamp.to_le_bytes());
             buf.extend(r.key.as_bytes());
-            buf.extend(r.value.as_bytes());
+            buf.extend(r.value.clone());
         });
-        sink.write_all(&buf);
+        sink.write_all(&buf).await.unwrap();
         memtable.len();
 
         (
@@ -118,7 +118,7 @@ impl DiskTable {
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
 
             let mut key = vec![0u8; key_size as usize];
-            stream.read_exact(&mut key);
+            stream.read_exact(&mut key).await.unwrap();
             stream.skip(value_size as u64);
 
             meta.push(RecordMetadata {
@@ -162,7 +162,7 @@ impl DiskTable {
                     hash,
                     timestamp,
                     key: std::str::from_utf8(&key).unwrap().to_string(),
-                    value: std::str::from_utf8(&value).unwrap().to_string(),
+                    value,
                 },
                 RecordMetadata {
                     data_ptr: super::RecordPtr::DiskTable((self.name.clone(), offset as u32)),
@@ -188,9 +188,9 @@ impl DiskTable {
         let result = self.fd.read_at(offset as u64, meta.size_of()).await.unwrap();
         let timestamp = u64::from_le_bytes(result[6..14].try_into().expect("incorrect length"));
         let key = std::str::from_utf8(&result[14..14 + meta.key_size as usize]).unwrap();
-        let value = std::str::from_utf8(&result[14 + meta.key_size as usize..14 + meta.key_size as usize + meta.value_size as usize]).unwrap();
+        let value = Vec::from(&result[14 + meta.key_size as usize..14 + meta.key_size as usize + meta.value_size as usize]);
 
-        Record::new_with_timestamp(key.to_string(), value.to_string(), timestamp)
+        Record::new_with_timestamp(key.to_string(), value, timestamp)
     }
 
     pub fn get_usage_ratio(&self) -> f32 {

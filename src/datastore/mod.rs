@@ -131,7 +131,7 @@ impl DataStore {
         let timestamp = crate::time::now();
         self.set_raw(Record {
             key: key.to_string(),
-            value: "".to_string(),
+            value: vec![],
             hash,
             timestamp,
         });
@@ -278,6 +278,10 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
+    fn assert_value_eq(r: &Record, expected: &str) {
+        assert_eq!(std::str::from_utf8(&r.value).unwrap(), expected);
+    }
+
     async fn test_datastore_for_consistency() {
         let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
         storage.init().await;
@@ -286,27 +290,27 @@ mod tests {
         assert!(opt.is_none());
         storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test1".to_string(), "foo1".to_string()));
+        storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
         let opt = storage.get("test1").await;
-        assert_eq!(opt.unwrap().value, "foo1");
+        assert_value_eq(&opt.unwrap(),"foo1");
         storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test2".to_string(), "foo2".to_string()));
+        storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
         let opt = storage.get("test2").await;
-        assert_eq!(opt.unwrap().value, "foo2");
+        assert_value_eq(&opt.unwrap(),"foo2");
         storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test3".to_string(), "foo99".to_string()));
+        storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes())));
         let opt = storage.get("test3").await;
-        assert_eq!(opt.unwrap().value, "foo99");
+        assert_value_eq(&opt.unwrap(),"foo99");
         storage.get_stats().assert_not_corrupted();
 
         storage.force_flush().await;
         storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test1".to_string(), "foo3".to_string()));
+        storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes())));
         let opt = storage.get("test1").await;
-        assert_eq!(opt.unwrap().value, "foo3");
+        assert_value_eq(&opt.unwrap(),"foo3");
         storage.get_stats().assert_not_corrupted();
 
         let opt = storage.get("test99999").await; // unknown key
@@ -322,7 +326,7 @@ mod tests {
         println!("{:?}", storage.get_stats());
 
         let opt = storage.get("test1").await;
-        assert_eq!(opt.unwrap().value, "foo3");
+        assert_value_eq(&opt.unwrap(),"foo3");
 
         let mut storage2 = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
         storage2.init().await;
@@ -336,10 +340,10 @@ mod tests {
         storage2.get_stats().assert_not_corrupted();
 
         let opt = storage2.get("test1").await;
-        assert_eq!(opt.unwrap().value, "foo3");
+        assert_value_eq(&opt.unwrap(),"foo3");
 
         let opt = storage2.get("test2").await;
-        assert_eq!(opt.unwrap().value, "foo2");
+        assert_value_eq(&opt.unwrap(),"foo2");
         storage2.get_stats().assert_not_corrupted();
 
         // Should have been deleted
@@ -357,10 +361,10 @@ mod tests {
         storage2.get_stats().assert_not_corrupted();
 
         let opt = storage.get("test1").await;
-        assert_eq!(opt.unwrap().value, "foo3");
+        assert_value_eq(&opt.unwrap(),"foo3");
 
         let opt = storage.get("test2").await;
-        assert_eq!(opt.unwrap().value, "foo2");
+        assert_value_eq(&opt.unwrap(),"foo2");
 
         let opt = storage2.get("test3").await;
         assert!(opt.is_none());
@@ -373,11 +377,11 @@ mod tests {
         storage.init().await;
         storage.truncate().await;
 
-        storage.set(Record::new("test1".to_string(), "foo1".to_string()));
-        storage.set(Record::new("test2".to_string(), "foo2".to_string()));
-        storage.set(Record::new("test3".to_string(), "foo3".to_string()));
-        storage.set(Record::new("test4".to_string(), "foo4".to_string()));
-        storage.set(Record::new("test5".to_string(), "foo5".to_string()));
+        storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
+        storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
+        storage.set(Record::new("test3".to_string(), Vec::from("foo3".as_bytes())));
+        storage.set(Record::new("test4".to_string(), Vec::from("foo4".as_bytes())));
+        storage.set(Record::new("test5".to_string(), Vec::from("foo5".as_bytes())));
         storage.force_flush().await;
 
         storage.get_stats().assert_not_corrupted();
@@ -390,8 +394,8 @@ mod tests {
         storage.maybe_run_one_reclaim().await;
         assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
 
-        storage.set(Record::new("test6".to_string(), "foo6".to_string()));
-        storage.set(Record::new("test7".to_string(), "foo7".to_string()));
+        storage.set(Record::new("test6".to_string(), Vec::from("foo6".as_bytes())));
+        storage.set(Record::new("test7".to_string(), Vec::from("foo7".as_bytes())));
         storage.force_flush().await;
         assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
 
@@ -399,8 +403,8 @@ mod tests {
         // No reason to make a compaction
         storage.maybe_run_one_reclaim().await;
         assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
-        storage.set(Record::new("test3".to_string(), "foo31".to_string()));
-        storage.set(Record::new("test4".to_string(), "foo41".to_string()));
+        storage.set(Record::new("test3".to_string(), Vec::from("foo31".as_bytes())));
+        storage.set(Record::new("test4".to_string(), Vec::from("foo41".as_bytes())));
 
         storage.maybe_run_one_reclaim().await;
         storage.force_flush().await;

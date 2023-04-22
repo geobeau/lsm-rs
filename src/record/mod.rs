@@ -25,18 +25,18 @@ pub fn hash_sha1_bytes(key: &[u8]) -> HashedKey {
 #[derive(Debug, Clone)]
 pub struct Record {
     pub key: String,
-    pub value: String,
+    pub value: Vec<u8>,
     pub hash: HashedKey,
     pub timestamp: u64,
 }
 
 impl Record {
-    pub fn new(key: String, value: String) -> Record {
+    pub fn new(key: String, value: Vec<u8>) -> Record {
         let timestamp = crate::time::now();
         Record::new_with_timestamp(key, value, timestamp)
     }
 
-    pub fn new_with_timestamp(key: String, value: String, timestamp: u64) -> Record {
+    pub fn new_with_timestamp(key: String, value: Vec<u8>, timestamp: u64) -> Record {
         let hash = hash_sha1(&key);
         Record { key, value, hash, timestamp }
     }
