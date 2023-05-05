@@ -1,6 +1,6 @@
-use futures::{AsyncReadExt};
+use futures::{AsyncReadExt, AsyncWriteExt};
 use std::io::Read;
-
+pub mod server;
 
 use glommio::net::TcpStream;
 
@@ -9,6 +9,24 @@ pub enum Command {
     Set(Set),
     Get(Get),
 }
+
+#[derive(Debug, Clone)]
+pub enum Response {
+    Set(SetResp),
+    Get(GetResp),
+}
+
+impl Response {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Response::Set(s) => s.to_bytes(),
+            Response::Get(g) => g.to_bytes(),
+        }
+    }
+
+}
+
+
 
 // 0x00    Get
 // 0x01    Set
@@ -38,8 +56,8 @@ pub enum Command {
 // 0x19    AppendQ
 // 0x1A    PrependQ
 
-const GET: u8 = 0u8;
-const SET: u8 = 1u8;
+const GET: u8 = 0x0;
+const SET: u8 = 0x1;
 
 #[derive(Debug, Clone)]
 pub struct Set {
@@ -54,13 +72,102 @@ pub struct Get {
     key: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SetResp {
+    pub opcode: OpCode,
+    pub cas: u64,
+}
+
+impl SetResp {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let h = Header {
+            magic: 0x81,
+            opcode: self.opcode.clone() as u8,
+            key_size: 0,
+            extra_size: 0,
+            status: 0,
+            body_length: 0,
+            opaque: 0,
+            cas: self.cas,
+            data_type: 0,
+        };
+        return h.to_be_bytes().to_vec()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GetResp {
+    pub flags: u32,
+}
+
+impl GetResp {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        Header{
+            magic: todo!(),
+            opcode: todo!(),
+            key_size: todo!(),
+            extra_size: todo!(),
+            status: todo!(),
+            body_length: todo!(),
+            opaque: todo!(),
+            cas: todo!(),
+            data_type: todo!(),
+        }.to_be_bytes().to_vec()
+    }
+}
+
+
+// 0x0000 	No error
+// 0x0001 	Key not found
+// 0x0002 	Key exists
+// 0x0003 	Value too large
+// 0x0004 	Invalid arguments
+// 0x0005 	Item not stored
+// 0x0006 	Incr/Decr on non-numeric value.
+// 0x0007 	The vbucket belongs to another server
+// 0x0008 	Authentication error
+// 0x0009 	Authentication continue
+// 0x0081 	Unknown command
+// 0x0082 	Out of memory
+// 0x0083 	Not supported
+// 0x0084 	Internal error
+// 0x0085 	Busy
+// 0x0086 	Temporary failure
+
+#[derive(Debug, Clone, Copy)]
+pub enum OpCode {
+    NoError = 0,
+    KeyNotFound = 1,
+    KeyExists = 2,
+    ValueTooLarge = 3,
+    InvalidArguments = 4,
+    ItemNotStored = 5,
+    IncrDecrNonNum = 6,
+    VBucketBelongsToAnotherServer = 7,
+    AuthErr = 8,
+    AuthContinue = 9,
+    UnknownCommand = 81,
+    OOM = 82,
+    NotSupported = 83,
+    InternalError = 84,
+    Busy = 85,
+    TemporaryFailure = 86,
+}
+
+pub enum GetResult {
+    Ok(Vec<u8>),
+    Err(OpCode)
+}
+
+
 #[derive(Debug)]
 struct Header {
     magic: u8,
     opcode: u8,
     key_size: u16,
     extra_size: u8,
-    status: u8,
+    data_type: u8,
+    status: u16,
     body_length: u32,
     opaque: u32,
     cas: u64,
@@ -69,6 +176,34 @@ struct Header {
 impl Header {
     fn get_data_length(&self) -> usize {
         self.body_length as usize - self.key_size as usize - self.extra_size as usize
+    }
+
+    fn to_be_bytes(&self) -> [u8; 24] {
+        let mut bytes = [0u8; 24];
+        bytes[0] = self.magic;
+        bytes[1] = self.opcode;
+        bytes[2..4].copy_from_slice(&self.key_size.to_be_bytes());
+        bytes[4] = self.extra_size;
+        bytes[5] = self.data_type;
+        bytes[6..8].copy_from_slice(&self.status.to_be_bytes());
+        bytes[8..12].copy_from_slice(&self.body_length.to_be_bytes());
+        bytes[12..16].copy_from_slice(&self.opaque.to_be_bytes());
+        bytes[16..24].copy_from_slice(&self.cas.to_be_bytes());
+        return bytes
+    }
+
+    fn from_be_bytes(bytes: [u8; 24]) -> Header {
+        Header {
+            magic: bytes[0],
+            opcode: bytes[1],
+            key_size: u16::from_be_bytes(bytes[2..4].try_into().unwrap()),
+            extra_size: bytes[4],
+            data_type: bytes[5],
+            status: u16::from_be_bytes(bytes[6..8].try_into().unwrap()),
+            body_length: u32::from_be_bytes(bytes[8..12].try_into().unwrap()),
+            opaque: u32::from_be_bytes(bytes[12..16].try_into().unwrap()),
+            cas: u64::from_be_bytes(bytes[16..24].try_into().unwrap()),
+        }
     }
 }
 
@@ -141,37 +276,23 @@ impl Header {
 // Data type           Reserved for future use (Sean is using this soon).
 
 pub struct MemcachedBinaryHandler {
-    pub reader: TcpStream,
+    pub stream: TcpStream,
 }
 
 impl MemcachedBinaryHandler {
-    async fn parse_header(&self, header_bytes: &[u8]) -> Header {
-        println!("{:?}", header_bytes);
-        Header {
-            magic: header_bytes[0],
-            opcode: header_bytes[1],
-            key_size: u16::from_be_bytes(header_bytes[2..4].try_into().unwrap()),
-            extra_size: header_bytes[4],
-            status: header_bytes[5],
-            body_length: u32::from_be_bytes(header_bytes[8..12].try_into().unwrap()),
-            opaque: u32::from_be_bytes(header_bytes[12..16].try_into().unwrap()),
-            cas: u64::from_be_bytes(header_bytes[16..24].try_into().unwrap()),
-        }
-    }
-
     async fn parse_set(&mut self, header: &Header) -> Option<Set> {
         assert_eq!(header.extra_size, 8u8);
 
         let mut extra_buf = [0u8; 8];
-        self.reader.read_exact(&mut extra_buf).await.unwrap();
+        self.stream.read_exact(&mut extra_buf).await.unwrap();
         let flags = u32::from_be_bytes(extra_buf[0..4].try_into().unwrap());
         let exptime = u32::from_be_bytes(extra_buf[4..8].try_into().unwrap());
 
         let mut key_bytes = vec![0u8; header.key_size as usize];
         let mut data = vec![0u8; header.get_data_length()];
 
-        self.reader.read_exact(&mut key_bytes).await.unwrap();
-        self.reader.read_exact(&mut data).await.unwrap();
+        self.stream.read_exact(&mut key_bytes).await.unwrap();
+        self.stream.read_exact(&mut data).await.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Set { key, flags, exptime, data })
@@ -181,15 +302,16 @@ impl MemcachedBinaryHandler {
         assert_eq!(header.extra_size, 0u8);
 
         let mut key_bytes = vec![0u8; header.key_size as usize];
-        self.reader.read_exact(&mut key_bytes).await.unwrap();
+        self.stream.read_exact(&mut key_bytes).await.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Get { key })
     }
+
     pub async fn decode_command(&mut self) -> Option<Command> {
         let mut header_buff = [0u8; 24];
-        self.reader.read_exact(&mut header_buff).await.unwrap();
-        let header = self.parse_header(&header_buff).await;
+        self.stream.read_exact(&mut header_buff).await.unwrap();
+        let header = Header::from_be_bytes(header_buff);
         println!("{:?}", header);
         println!("{:?}", header.get_data_length());
         match header.opcode {
@@ -198,7 +320,13 @@ impl MemcachedBinaryHandler {
             _ => todo!(),
         }
     }
+
+    pub async fn write_resp(&mut self, buff: &[u8]) {
+        self.stream.write(buff).await;
+    }
 }
+
+
 
 // impl Iterator for MemcachedBinaryHandler {
 //     type Item = Command;
