@@ -1,8 +1,8 @@
 use futures::{AsyncReadExt, AsyncWriteExt};
-use std::io::Read;
+use std::{io::Read, time::Duration};
 pub mod server;
 
-use glommio::net::TcpStream;
+use glommio::{net::TcpStream, timer::sleep};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -98,21 +98,37 @@ impl SetResp {
 #[derive(Debug, Clone)]
 pub struct GetResp {
     pub flags: u32,
+    pub opcode: OpCode,
+    pub cas: u64,
+    pub value: Option<Vec<u8>>
 }
 
 impl GetResp {
     pub fn to_bytes(&self) -> Vec<u8> {
-        Header{
-            magic: todo!(),
-            opcode: todo!(),
-            key_size: todo!(),
-            extra_size: todo!(),
-            status: todo!(),
-            body_length: todo!(),
-            opaque: todo!(),
-            cas: todo!(),
-            data_type: todo!(),
-        }.to_be_bytes().to_vec()
+        let value_size = match &self.value {
+            Some(v) => v.len(),
+            None => 0,
+        } as u32;
+        let body_size = 4 + value_size as usize;
+        let mut resp = Vec::with_capacity(body_size);
+        resp.extend(Header{
+            magic: 0x81,
+            opcode: 0x0,
+            key_size: 0,
+            extra_size: 0,
+            status: 0,
+            body_length: body_size as u32,
+            opaque: 0,
+            cas: self.cas,
+            data_type: 0,
+        }.to_be_bytes().to_vec());
+        resp.extend(self.flags.to_be_bytes());
+        match &self.value {
+            Some(v) => resp.extend(v.clone()),
+            None => (),
+        };
+        println!("{:?}", resp);
+        return resp
     }
 }
 
@@ -306,6 +322,24 @@ impl MemcachedBinaryHandler {
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Get { key })
+    }
+
+    pub async fn await_new_data(&mut self) {
+        // TODO: Make this a future
+        let mut buffer = [0u8; 24];
+        loop {
+            let res = self.stream.peek(&mut buffer).await;
+            match res {
+                Ok(b) => {
+                    if b > 0 {
+                        return;
+                    }
+                },
+                Err(r) => panic!("{:?}", r),
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
+        
     }
 
     pub async fn decode_command(&mut self) -> Option<Command> {
