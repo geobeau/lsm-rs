@@ -1,36 +1,18 @@
 use glommio::{net::TcpListener, prelude::*};
 use lsm_rs::{datastore::DataStore, memcached::{MemcachedBinaryHandler, server::MemcachedBinaryServer, Get, GetResp, SetResp, Set}, record::Record};
 
-fn handle_get(g: Get) -> GetResp {
-    return GetResp {
-        flags: 0,
-    }
-}
-
-fn handle_set(s: Set) -> SetResp {
-    return SetResp {
-        opcode: lsm_rs::memcached::OpCode::NoError,
-        cas: 0,
-    }
-}
-
 
 
 fn main() {
     let ex = LocalExecutorBuilder::new(Placement::Fixed(0)).make().unwrap();
     ex.run(async move {
-        let mut s = DataStore::new("./data/".into()).await;
-        s.set(Record::new("test".to_string(), Vec::from("test".as_bytes())));
-        println!("{:?}", s.get("test").await.unwrap());
-    });
+        let mut ds = DataStore::new("./data/".into()).await;
+        ds.set(Record::new("titi".to_string(), Vec::from("toto".as_bytes())));
+        println!("{:?}", ds.get("titi").await.unwrap());
 
-
-
-    ex.run(async move {
         let s = MemcachedBinaryServer {
             host_port: "127.0.0.1:11211".to_string(),
-            get_handler: handle_get,
-            set_handler: handle_set,
+            storage: ds,
         };
         s.listen().await;
     });

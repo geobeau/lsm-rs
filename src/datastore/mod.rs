@@ -162,7 +162,7 @@ impl DataStore {
         }
     }
 
-    pub async fn get(&mut self, key: &str) -> Option<Record> {
+    pub async fn get(&self, key: &str) -> Option<Record> {
         self.get_with_hash(record::hash_sha1(key)).await
     }
 
