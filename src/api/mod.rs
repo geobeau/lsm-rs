@@ -15,5 +15,5 @@ pub struct Delete {
 }
 
 pub struct Set {
-    record: Record
+    record: Record,
 }

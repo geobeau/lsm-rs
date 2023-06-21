@@ -119,14 +119,14 @@ impl DataStore {
     pub async fn truncate(&mut self) {
         self.index.truncate();
         self.memtable.truncate();
-        self.table_manager.truncate();
+        self.table_manager.truncate().await;
     }
 
-    pub fn set(&mut self, record: Record) {
-        self.set_raw(record);
+    pub async fn set(&self, record: Record) {
+        self.set_raw(record).await;
     }
 
-    pub fn delete(&mut self, key: &str) {
+    pub async fn delete(&self, key: &str) {
         let hash = hash_sha1(key);
         let timestamp = crate::time::now();
         self.set_raw(Record {
@@ -134,10 +134,11 @@ impl DataStore {
             value: vec![],
             hash,
             timestamp,
-        });
+        })
+        .await;
     }
 
-    fn set_raw(&mut self, r: Record) {
+    async fn set_raw(&self, r: Record) {
         let hash = r.hash;
         let key_size = r.key.len() as u16;
         let value_size = r.value.len() as u32;
@@ -158,7 +159,7 @@ impl DataStore {
         };
 
         if let Some(old_meta) = self.index.update(meta) {
-            self.remove_reference_from_storage(&old_meta);
+            self.remove_reference_from_storage(&old_meta).await;
         }
     }
 
@@ -168,12 +169,14 @@ impl DataStore {
 
     pub async fn rebuild_index_from_disk(&mut self) {
         let mut meta_to_update: Vec<RecordMetadata> = Vec::new();
-        for (_n, t) in self.table_manager.tables.iter_mut() {
+        for t in self.table_manager.get_tables().into_iter() {
             let meta = t.read_all_metadata().await;
             let updates: Vec<RecordMetadata> = meta.into_iter().filter_map(|m| self.index.update(m)).collect();
             meta_to_update.extend(updates);
         }
-        meta_to_update.iter().for_each(|m| self.remove_reference_from_storage(m));
+        for meta in meta_to_update {
+            self.remove_reference_from_storage(&meta).await;
+        }
     }
 
     pub async fn get_with_hash(&self, hash: HashedKey) -> Option<Record> {
@@ -185,9 +188,9 @@ impl DataStore {
             return None;
         }
         match meta.data_ptr {
-            RecordPtr::DiskTable(_) => Some(self.table_manager.get(meta).await),
-            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash).clone()),
-            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash).clone()),
+            RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta).await),
+            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash)),
+            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash)),
         }
     }
 
@@ -201,27 +204,27 @@ impl DataStore {
             // Update the index
             .filter_map(|m| self.index.update(m))
             .collect();
-        meta_to_update
-            .iter()
-            // Make sure the references are correctly handled
-            .for_each(|old_meta| self.remove_reference_from_storage(old_meta));
-        assert!(self.memtable.references == 0);
+        for old_meta in meta_to_update {
+            self.remove_reference_from_storage(&old_meta).await;
+        }
+        println!("{}", self.memtable.references());
+        assert!(self.memtable.references() == 0);
         self.memtable.truncate();
     }
 
-    fn remove_reference_from_storage(&mut self, meta: &RecordMetadata) {
+    async fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
         match &meta.data_ptr {
-            RecordPtr::DiskTable((table, _)) => self.table_manager.remove_reference_from_storage(table),
-            RecordPtr::MemTable(_) => self.memtable.references -= 1,
+            RecordPtr::DiskTable((table, _)) => self.table_manager.remove_reference_from_storage(table).await,
+            RecordPtr::MemTable(_) => self.memtable.decr_references(1),
             RecordPtr::Compacting((table, _)) => {
-                self.table_manager.remove_reference_from_storage(table);
-                self.memtable.references -= 1;
+                self.table_manager.remove_reference_from_storage(table).await;
+                self.memtable.decr_references(1);
             }
         };
     }
 
-    async fn reclaim_disktable(&mut self, n: &Rc<String>) {
-        let t = self.table_manager.tables.get_mut(n).unwrap();
+    async fn reclaim_disktable(&self, n: &Rc<String>) {
+        let t = self.table_manager.get_table(n).unwrap();
         // TODO datastore should not access tables directly
         let meta_to_update: Vec<RecordMetadata> = t
             .read_all_data()
@@ -234,7 +237,7 @@ impl DataStore {
                         return Some(meta);
                     }
                 }
-                if meta.is_tombstone() && meta.timestamp < self.table_manager.oldest_table {
+                if meta.is_tombstone() && meta.timestamp < self.table_manager.get_oldest_table() {
                     self.index.delete(&meta);
                     return None;
                 }
@@ -246,12 +249,14 @@ impl DataStore {
             })
             .collect();
 
-        meta_to_update.iter().for_each(|meta| self.remove_reference_from_storage(meta));
+        for meta in meta_to_update {
+            self.remove_reference_from_storage(&meta).await;
+        }
     }
 
     pub async fn maybe_run_one_reclaim(&mut self) {
-        if let Some(n) = self.table_manager.get_best_table_to_reclaim() {
-            self.reclaim_disktable(&n);
+        if let Some(n) = self.table_manager.get_best_table_to_reclaim().await {
+            self.reclaim_disktable(&n).await;
         }
     }
 
@@ -275,6 +280,8 @@ impl DataStore {
 
 #[cfg(test)]
 mod tests {
+    use glommio::LocalExecutor;
+
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
@@ -282,146 +289,155 @@ mod tests {
         assert_eq!(std::str::from_utf8(&r.value).unwrap(), expected);
     }
 
-    async fn test_datastore_for_consistency() {
-        let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
-        storage.init().await;
-        storage.truncate().await;
-        let opt = storage.get("test").await;
-        assert!(opt.is_none());
-        storage.get_stats().assert_not_corrupted();
+    #[test]
+    fn test_datastore_for_consistency() {
+        let local_ex = LocalExecutor::default();
+        local_ex.run(async {
+            let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
+            storage.init().await;
+            storage.truncate().await;
+            let opt = storage.get("test").await;
+            assert!(opt.is_none());
+            storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
-        let opt = storage.get("test1").await;
-        assert_value_eq(&opt.unwrap(),"foo1");
-        storage.get_stats().assert_not_corrupted();
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes()))).await;
+            let opt = storage.get("test1").await;
+            assert_value_eq(&opt.unwrap(), "foo1");
+            storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
-        let opt = storage.get("test2").await;
-        assert_value_eq(&opt.unwrap(),"foo2");
-        storage.get_stats().assert_not_corrupted();
+            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes()))).await;
+            let opt = storage.get("test2").await;
+            assert_value_eq(&opt.unwrap(), "foo2");
+            storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes())));
-        let opt = storage.get("test3").await;
-        assert_value_eq(&opt.unwrap(),"foo99");
-        storage.get_stats().assert_not_corrupted();
+            storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes()))).await;
+            let opt = storage.get("test3").await;
+            assert_value_eq(&opt.unwrap(), "foo99");
+            storage.get_stats().assert_not_corrupted();
 
-        storage.force_flush().await;
-        storage.get_stats().assert_not_corrupted();
+            storage.force_flush().await;
+            storage.get_stats().assert_not_corrupted();
 
-        storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes())));
-        let opt = storage.get("test1").await;
-        assert_value_eq(&opt.unwrap(),"foo3");
-        storage.get_stats().assert_not_corrupted();
+            storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes()))).await;
 
-        let opt = storage.get("test99999").await; // unknown key
-        assert!(opt.is_none());
-        storage.get_stats().assert_not_corrupted();
+            let opt = storage.get("test1").await;
+            assert_value_eq(&opt.unwrap(), "foo3");
+            storage.get_stats().assert_not_corrupted();
 
-        storage.delete("test3");
-        let opt = storage.get("test3").await;
-        assert!(opt.is_none());
-        storage.get_stats().assert_not_corrupted();
-        storage.force_flush().await;
-        storage.get_stats().assert_not_corrupted();
-        println!("{:?}", storage.get_stats());
+            let opt = storage.get("test99999").await; // unknown key
+            assert!(opt.is_none());
+            storage.get_stats().assert_not_corrupted();
 
-        let opt = storage.get("test1").await;
-        assert_value_eq(&opt.unwrap(),"foo3");
+            storage.delete("test3").await;
+            let opt = storage.get("test3").await;
+            assert!(opt.is_none());
+            storage.get_stats().assert_not_corrupted();
+            storage.force_flush().await;
+            storage.get_stats().assert_not_corrupted();
+            println!("{:?}", storage.get_stats());
 
-        let mut storage2 = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
-        storage2.init().await;
-        storage2.get_stats().assert_not_corrupted();
+            let opt = storage.get("test1").await;
+            assert_value_eq(&opt.unwrap(), "foo3");
 
-        let opt = storage2.get("test1").await;
-        assert!(opt.is_none());
-        storage2.get_stats().assert_not_corrupted();
+            let mut storage2 = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
+            storage2.init().await;
+            storage2.get_stats().assert_not_corrupted();
 
-        storage2.rebuild_index_from_disk().await;
-        storage2.get_stats().assert_not_corrupted();
+            let opt = storage2.get("test1").await;
+            assert!(opt.is_none());
+            storage2.get_stats().assert_not_corrupted();
 
-        let opt = storage2.get("test1").await;
-        assert_value_eq(&opt.unwrap(),"foo3");
+            storage2.rebuild_index_from_disk().await;
+            storage2.get_stats().assert_not_corrupted();
 
-        let opt = storage2.get("test2").await;
-        assert_value_eq(&opt.unwrap(),"foo2");
-        storage2.get_stats().assert_not_corrupted();
+            let opt = storage2.get("test1").await;
+            assert_value_eq(&opt.unwrap(), "foo3");
 
-        // Should have been deleted
-        let opt = storage2.get("test3").await;
-        assert!(opt.is_none());
-        storage2.get_stats().assert_not_corrupted();
+            let opt = storage2.get("test2").await;
+            assert_value_eq(&opt.unwrap(), "foo2");
+            storage2.get_stats().assert_not_corrupted();
 
-        println!("{:?}", storage2.get_stats());
-        storage2.reclaim_all_disktables().await;
-        println!("{:?}", storage2.get_stats());
-        assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 0);
-        storage2.force_flush().await;
-        assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 2);
-        storage2.table_manager.delete_disktables_marked_for_deletion();
-        storage2.get_stats().assert_not_corrupted();
+            // Should have been deleted
+            let opt = storage2.get("test3").await;
+            assert!(opt.is_none());
+            storage2.get_stats().assert_not_corrupted();
 
-        let opt = storage.get("test1").await;
-        assert_value_eq(&opt.unwrap(),"foo3");
+            println!("{:?}", storage2.get_stats());
+            storage2.reclaim_all_disktables().await;
+            println!("{:?}", storage2.get_stats());
+            assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 0);
+            storage2.force_flush().await;
+            assert_eq!(storage2.table_manager.get_disktables_marked_for_deletion().len(), 2);
+            storage2.table_manager.delete_disktables_marked_for_deletion();
+            storage2.get_stats().assert_not_corrupted();
 
-        let opt = storage.get("test2").await;
-        assert_value_eq(&opt.unwrap(),"foo2");
+            let opt = storage.get("test1").await;
+            assert_value_eq(&opt.unwrap(), "foo3");
 
-        let opt = storage2.get("test3").await;
-        assert!(opt.is_none());
+            let opt = storage.get("test2").await;
+            assert_value_eq(&opt.unwrap(), "foo2");
 
-        println!("{:?}", storage.get_stats());
+            let opt = storage2.get("test3").await;
+            assert!(opt.is_none());
+
+            println!("{:?}", storage.get_stats());
+        });
     }
 
-    async fn test_datastore_for_flush_and_compactions() {
-        let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_flush_and_compactions")).await;
-        storage.init().await;
-        storage.truncate().await;
+    #[test]
+    fn test_datastore_for_flush_and_compactions() {
+        let local_ex = LocalExecutor::default();
+        local_ex.run(async {
+            let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_flush_and_compactions")).await;
+            storage.init().await;
+            storage.truncate().await;
 
-        storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
-        storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
-        storage.set(Record::new("test3".to_string(), Vec::from("foo3".as_bytes())));
-        storage.set(Record::new("test4".to_string(), Vec::from("foo4".as_bytes())));
-        storage.set(Record::new("test5".to_string(), Vec::from("foo5".as_bytes())));
-        storage.force_flush().await;
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes()))).await;
+            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes()))).await;
+            storage.set(Record::new("test3".to_string(), Vec::from("foo3".as_bytes()))).await;
+            storage.set(Record::new("test4".to_string(), Vec::from("foo4".as_bytes()))).await;
+            storage.set(Record::new("test5".to_string(), Vec::from("foo5".as_bytes()))).await;
+            storage.force_flush().await;
 
-        storage.get_stats().assert_not_corrupted();
+            storage.get_stats().assert_not_corrupted();
 
-        // Try to flush empty memtable: should not add a new disktable
-        storage.force_flush().await;
-        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+            // Try to flush empty memtable: should not add a new disktable
+            storage.force_flush().await;
+            assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
 
-        // Reclaiming with only one table doesn't do anything
-        storage.maybe_run_one_reclaim().await;
-        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+            // Reclaiming with only one table doesn't do anything
+            storage.maybe_run_one_reclaim().await;
+            assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
 
-        storage.set(Record::new("test6".to_string(), Vec::from("foo6".as_bytes())));
-        storage.set(Record::new("test7".to_string(), Vec::from("foo7".as_bytes())));
-        storage.force_flush().await;
-        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+            storage.set(Record::new("test6".to_string(), Vec::from("foo6".as_bytes()))).await;
+            storage.set(Record::new("test7".to_string(), Vec::from("foo7".as_bytes()))).await;
+            storage.force_flush().await;
+            assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
 
-        println!("{:?}", storage.get_stats());
-        // No reason to make a compaction
-        storage.maybe_run_one_reclaim().await;
-        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
-        storage.set(Record::new("test3".to_string(), Vec::from("foo31".as_bytes())));
-        storage.set(Record::new("test4".to_string(), Vec::from("foo41".as_bytes())));
+            println!("{:?}", storage.get_stats());
+            // No reason to make a compaction
+            storage.maybe_run_one_reclaim().await;
+            assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+            storage.set(Record::new("test3".to_string(), Vec::from("foo31".as_bytes()))).await;
+            storage.set(Record::new("test4".to_string(), Vec::from("foo41".as_bytes()))).await;
 
-        storage.maybe_run_one_reclaim().await;
-        storage.force_flush().await;
-        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
-        storage.table_manager.delete_disktables_marked_for_deletion();
-        assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+            storage.maybe_run_one_reclaim().await;
+            storage.force_flush().await;
+            assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
+            storage.table_manager.delete_disktables_marked_for_deletion();
+            assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
 
-        // if we delete all data in a disktable, it should be ready for deletion
-        storage.delete("test6");
-        storage.delete("test7");
-        storage.force_flush().await;
-        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
-        storage.table_manager.delete_disktables_marked_for_deletion();
+            // if we delete all data in a disktable, it should be ready for deletion
+            storage.delete("test6").await;
+            storage.delete("test7").await;
+            storage.force_flush().await;
+            assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
+            storage.table_manager.delete_disktables_marked_for_deletion();
 
-        storage.reclaim_all_disktables().await;
-        storage.force_flush().await;
-        storage.table_manager.delete_disktables_marked_for_deletion();
-        assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
+            storage.reclaim_all_disktables().await;
+            storage.force_flush().await;
+            storage.table_manager.delete_disktables_marked_for_deletion();
+            assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 0);
+        });
     }
 }

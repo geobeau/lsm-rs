@@ -23,10 +23,7 @@ impl Response {
             Response::Get(g) => g.to_bytes(),
         }
     }
-
 }
-
-
 
 // 0x00    Get
 // 0x01    Set
@@ -82,7 +79,7 @@ impl SetResp {
     pub fn to_bytes(&self) -> Vec<u8> {
         let h = Header {
             magic: 0x81,
-            opcode: self.opcode.clone() as u8,
+            opcode: self.opcode as u8,
             key_size: 0,
             extra_size: 0,
             status: 0,
@@ -91,7 +88,7 @@ impl SetResp {
             cas: self.cas,
             data_type: 0,
         };
-        return h.to_be_bytes().to_vec()
+        h.to_be_bytes().to_vec()
     }
 }
 
@@ -100,7 +97,7 @@ pub struct GetResp {
     pub flags: u32,
     pub opcode: OpCode,
     pub cas: u64,
-    pub value: Option<Vec<u8>>
+    pub value: Option<Vec<u8>>,
 }
 
 impl GetResp {
@@ -111,27 +108,30 @@ impl GetResp {
         } as u32;
         let body_size = 4 + value_size as usize;
         let mut resp = Vec::with_capacity(body_size);
-        resp.extend(Header{
-            magic: 0x81,
-            opcode: 0x0,
-            key_size: 0,
-            extra_size: 0,
-            status: 0,
-            body_length: body_size as u32,
-            opaque: 0,
-            cas: self.cas,
-            data_type: 0,
-        }.to_be_bytes().to_vec());
+        resp.extend(
+            Header {
+                magic: 0x81,
+                opcode: 0x0,
+                key_size: 0,
+                extra_size: 0,
+                status: 0,
+                body_length: body_size as u32,
+                opaque: 0,
+                cas: self.cas,
+                data_type: 0,
+            }
+            .to_be_bytes()
+            .to_vec(),
+        );
         resp.extend(self.flags.to_be_bytes());
         match &self.value {
             Some(v) => resp.extend(v.clone()),
             None => (),
         };
         println!("{:?}", resp);
-        return resp
+        resp
     }
 }
-
 
 // 0x0000 	No error
 // 0x0001 	Key not found
@@ -172,9 +172,8 @@ pub enum OpCode {
 
 pub enum GetResult {
     Ok(Vec<u8>),
-    Err(OpCode)
+    Err(OpCode),
 }
-
 
 #[derive(Debug)]
 struct Header {
@@ -205,7 +204,7 @@ impl Header {
         bytes[8..12].copy_from_slice(&self.body_length.to_be_bytes());
         bytes[12..16].copy_from_slice(&self.opaque.to_be_bytes());
         bytes[16..24].copy_from_slice(&self.cas.to_be_bytes());
-        return bytes
+        bytes
     }
 
     fn from_be_bytes(bytes: [u8; 24]) -> Header {
@@ -334,12 +333,11 @@ impl MemcachedBinaryHandler {
                     if b > 0 {
                         return;
                     }
-                },
+                }
                 Err(r) => panic!("{:?}", r),
             }
             sleep(Duration::from_millis(1)).await;
         }
-        
     }
 
     pub async fn decode_command(&mut self) -> Option<Command> {
@@ -359,8 +357,6 @@ impl MemcachedBinaryHandler {
         self.stream.write(buff).await;
     }
 }
-
-
 
 // impl Iterator for MemcachedBinaryHandler {
 //     type Item = Command;
