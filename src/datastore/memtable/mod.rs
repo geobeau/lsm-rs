@@ -1,9 +1,13 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use crate::record::{HashedKey, Record};
 
 pub struct MemTable {
-    buffer: HashMap<HashedKey, Record>,
+    buffer: RefCell<HashMap<HashedKey, Record>>,
+    stats: RefCell<Stats>,
+}
+
+struct Stats {
     /// Number of references on it from the index
     pub references: usize,
     /// Number of bytes of data added to it
@@ -13,44 +17,55 @@ pub struct MemTable {
 impl MemTable {
     pub fn new() -> MemTable {
         MemTable {
-            buffer: HashMap::new(),
-            references: 0,
-            bytes: 0,
+            buffer: RefCell::from(HashMap::new()),
+            stats: RefCell::from(Stats { references: 0, bytes: 0 }),
         }
     }
 
-    pub fn append(&mut self, record: Record) {
+    pub fn append(&self, record: Record) {
         let size = record.size_of();
-        if let Some(old) = self.buffer.insert(record.hash, record) {
-            self.bytes -= old.size_of();
+        let mut mutable_stats = self.stats.borrow_mut();
+        if let Some(old) = self.buffer.borrow_mut().insert(record.hash, record) {
+            mutable_stats.bytes -= old.size_of();
         }
-        self.references += 1;
-        self.bytes += size;
+        mutable_stats.references += 1;
+        mutable_stats.bytes += size;
     }
 
-    pub fn get(&self, hash: &HashedKey) -> &Record {
-        &self.buffer[hash]
+    pub fn get(&self, hash: &HashedKey) -> Record {
+        self.buffer.borrow()[hash].clone()
     }
 
     pub fn len(&self) -> usize {
-        self.buffer.len()
+        self.buffer.borrow().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
+        self.buffer.borrow().is_empty()
     }
 
     pub fn references(&self) -> usize {
-        self.references
+        self.stats.borrow().references
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Values<[u8; 20], Record> {
-        self.buffer.values()
+    pub fn decr_references(&self, val: usize) {
+        self.stats.borrow_mut().references -= val;
+    }
+
+    pub fn get_byte_size(&self) -> usize {
+        self.stats.borrow().bytes
+    }
+
+    pub fn values(&self) -> Vec<Record> {
+        self.buffer.borrow().values().cloned().collect()
     }
 
     pub fn truncate(&mut self) {
-        self.buffer = HashMap::new();
-        self.bytes = 0;
-        self.references = 0;
+        let mut mutable_stats = self.stats.borrow_mut();
+        let mut mutable_buffer = self.buffer.borrow_mut();
+        *mutable_buffer = HashMap::new();
+
+        mutable_stats.bytes = 0;
+        mutable_stats.references = 0;
     }
 }

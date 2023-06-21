@@ -1,25 +1,30 @@
-use std::collections::{
-    hash_map::Entry::{Occupied, Vacant},
-    HashMap,
+use std::{
+    cell::RefCell,
+    collections::{
+        hash_map::Entry::{Occupied, Vacant},
+        HashMap,
+    },
 };
 
 use super::{HashedKey, RecordMetadata};
 
 #[derive(Debug)]
 pub struct Index {
-    kvs: HashMap<HashedKey, RecordMetadata>,
+    kvs: RefCell<HashMap<HashedKey, RecordMetadata>>,
 }
 
 impl Index {
     pub fn new() -> Index {
-        Index { kvs: HashMap::new() }
+        Index {
+            kvs: RefCell::from(HashMap::new()),
+        }
     }
 
     /// Update the index with new metadata
     /// If there was already a record in the index with older metadata (timestamp)
     /// return it and apply the new one.
-    pub fn update(&mut self, meta: RecordMetadata) -> Option<RecordMetadata> {
-        match self.kvs.entry(meta.hash) {
+    pub fn update(&self, meta: RecordMetadata) -> Option<RecordMetadata> {
+        match self.kvs.borrow_mut().entry(meta.hash) {
             Occupied(mut entry) => {
                 let old = entry.get();
                 match meta.timestamp.cmp(&old.timestamp) {
@@ -35,22 +40,19 @@ impl Index {
         }
     }
 
-    pub fn delete(&mut self, meta: &RecordMetadata) {
-        self.kvs.remove(&meta.hash);
+    pub fn delete(&self, meta: &RecordMetadata) {
+        self.kvs.borrow_mut().remove(&meta.hash);
     }
 
-    pub fn get(&self, hash: HashedKey) -> Option<&RecordMetadata> {
-        match self.kvs.get(&hash) {
-            Some(r) => Some(r),
-            None => None,
-        }
+    pub fn get(&self, hash: HashedKey) -> Option<RecordMetadata> {
+        self.kvs.borrow().get(&hash).cloned()
     }
 
-    pub fn truncate(&mut self) {
-        self.kvs.clear();
+    pub fn truncate(&self) {
+        self.kvs.borrow_mut().clear();
     }
 
     pub fn len(&self) -> usize {
-        self.kvs.len()
+        self.kvs.borrow().len()
     }
 }

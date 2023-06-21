@@ -1,17 +1,16 @@
-use futures::AsyncWriteExt;
 use glommio::net::TcpListener;
 
-use crate::{memcached::{MemcachedBinaryHandler, Command, Response}, datastore::DataStore};
+use crate::{
+    datastore::DataStore,
+    memcached::{Command, MemcachedBinaryHandler, Response},
+};
 
-use super::{Get, Set, GetResp, SetResp, OpCode};
-
-
+use super::{Get, GetResp, OpCode, Set, SetResp};
 
 pub struct MemcachedBinaryServer {
     pub host_port: String,
     pub storage: DataStore,
 }
-
 
 impl MemcachedBinaryServer {
     async fn handle_get(&self, g: Get) -> GetResp {
@@ -19,16 +18,16 @@ impl MemcachedBinaryServer {
             Some(r) => Some(r.value),
             None => None,
         };
-        return GetResp {
+        GetResp {
             flags: 0,
             opcode: OpCode::NoError,
             cas: 0,
             value: maybe_value,
         }
     }
-    
-    async fn handle_set(&self, s: Set) -> SetResp {
-        return SetResp {
+
+    async fn handle_set(&self, _s: Set) -> SetResp {
+        SetResp {
             opcode: OpCode::NoError,
             cas: 0,
         }
@@ -39,7 +38,7 @@ impl MemcachedBinaryServer {
         println!("Listening on {}", listener.local_addr().unwrap());
         loop {
             println!("Waiting request!");
-            let mut stream = listener.accept().await.unwrap();
+            let stream = listener.accept().await.unwrap();
             let mut handler = MemcachedBinaryHandler { stream };
             loop {
                 handler.await_new_data().await;
@@ -49,15 +48,12 @@ impl MemcachedBinaryServer {
                 let resp = match command {
                     Command::Set(c) => Response::Set(self.handle_set(c).await),
                     Command::Get(c) => Response::Get(self.handle_get(c).await),
-                }.to_bytes();
-        
+                }
+                .to_bytes();
+
                 handler.write_resp(&resp).await;
                 println!("Responded!");
             }
-
         }
     }
-
-
-    
 }
