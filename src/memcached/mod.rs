@@ -354,7 +354,7 @@ impl MemcachedBinaryHandler {
     }
 
     pub async fn write_resp(&mut self, buff: &[u8]) {
-        self.stream.write(buff).await;
+        self.stream.write(buff).await.unwrap();
     }
 }
 

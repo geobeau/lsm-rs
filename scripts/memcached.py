@@ -14,4 +14,9 @@ sleep(1)
 value = mc.get("titi")
 print(value)
 assert value == "tutu"
+mc.set("foo", "bar")
+value = mc.get("foo")
+print(value)
+assert value == "bar"
+
 print("done")
