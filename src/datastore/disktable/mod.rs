@@ -259,7 +259,7 @@ impl Manager {
             // write() is used here because the table is going to be destroyed
             // ensure only one ref is in use (ours)
             assert_eq!(Rc::strong_count(&table), 1);
-            table.fd.close();
+            table.fd.close().unwrap();
             std::fs::remove_file(table.path.clone()).unwrap();
         }
     }
