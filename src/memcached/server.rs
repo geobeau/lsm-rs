@@ -4,7 +4,8 @@ use glommio::net::TcpListener;
 
 use crate::{
     datastore::DataStore,
-    memcached::{Command, MemcachedBinaryHandler, Response}, record::Record,
+    memcached::{Command, MemcachedBinaryHandler, Response},
+    record::Record,
 };
 
 use super::{Get, GetResp, OpCode, Set, SetResp};
@@ -12,15 +13,13 @@ use super::{Get, GetResp, OpCode, Set, SetResp};
 #[derive(Clone)]
 pub struct MemcachedBinaryServer {
     pub host_port: String,
-    pub storage: StorageProxy
+    pub storage: StorageProxy,
 }
 
 #[derive(Clone)]
 pub struct StorageProxy {
     pub storage: Rc<DataStore>,
 }
-
-
 
 impl MemcachedBinaryServer {
     pub async fn listen(self) {
@@ -45,12 +44,12 @@ impl MemcachedBinaryServer {
                         Command::Get(c) => Response::Get(storage.handle_get(c).await),
                     }
                     .to_bytes();
-    
+
                     handler.write_resp(&resp).await;
                     println!("Responded!");
                 }
-            }).detach();
-
+            })
+            .detach();
         }
     }
 }
