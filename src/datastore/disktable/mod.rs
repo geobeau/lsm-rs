@@ -1,9 +1,6 @@
-use futures::prelude::*;
-use futures::stream::StreamExt;
 use futures::{AsyncReadExt, AsyncWriteExt};
 use glommio::io::{ImmutableFile, ImmutableFileBuilder};
 use glommio::sync::RwLock;
-use std::borrow::Borrow;
 use std::cell::{Cell, RefCell};
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 

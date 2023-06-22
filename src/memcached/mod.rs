@@ -1,5 +1,5 @@
 use futures::{AsyncReadExt, AsyncWriteExt};
-use std::{io::Read, time::Duration};
+use std::{time::Duration};
 pub mod server;
 
 use glommio::{net::TcpStream, timer::sleep};

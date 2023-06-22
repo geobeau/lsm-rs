@@ -1,4 +1,4 @@
-use std::{fs, hash::Hash, path::PathBuf, rc::Rc};
+use std::{fs, path::PathBuf, rc::Rc};
 
 use crate::record::{self, hash_sha1, HashedKey, Record};
 
