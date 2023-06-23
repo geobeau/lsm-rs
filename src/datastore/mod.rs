@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, rc::Rc};
 
-use crate::record::{self, hash_sha1, HashedKey, Record};
+use crate::record::{HashedKey, Key, Record};
 
 use self::disktable::ManagerStats;
 
@@ -126,21 +126,19 @@ impl DataStore {
         self.set_raw(record).await;
     }
 
-    pub async fn delete(&self, key: &str) {
-        let hash = hash_sha1(key);
+    pub async fn delete(&self, key: &Key) {
         let timestamp = crate::time::now();
         self.set_raw(Record {
-            key: key.to_string(),
+            key: key.clone(),
             value: vec![],
-            hash,
             timestamp,
         })
         .await;
     }
 
     async fn set_raw(&self, r: Record) {
-        let hash = r.hash;
-        let key_size = r.key.len() as u16;
+        let hash = r.key.hash;
+        let key_size = r.key.string.len() as u16;
         let value_size = r.value.len() as u32;
         let timestamp = r.timestamp;
 
@@ -163,8 +161,19 @@ impl DataStore {
         }
     }
 
-    pub async fn get(&self, key: &str) -> Option<Record> {
-        self.get_with_hash(record::hash_sha1(key)).await
+    pub async fn get(&self, key: &Key) -> Option<Record> {
+        let meta = match self.index.get(key.hash) {
+            Some(meta) => meta,
+            None => return None,
+        };
+        if meta.is_tombstone() {
+            return None;
+        }
+        match meta.data_ptr {
+            RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta).await),
+            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash)),
+            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash)),
+        }
     }
 
     pub async fn rebuild_index_from_disk(&mut self) {
@@ -176,21 +185,6 @@ impl DataStore {
         }
         for meta in meta_to_update {
             self.remove_reference_from_storage(&meta).await;
-        }
-    }
-
-    pub async fn get_with_hash(&self, hash: HashedKey) -> Option<Record> {
-        let meta = match self.index.get(hash) {
-            Some(meta) => meta,
-            None => return None,
-        };
-        if meta.is_tombstone() {
-            return None;
-        }
-        match meta.data_ptr {
-            RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta).await),
-            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash)),
-            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash)),
         }
     }
 
@@ -207,7 +201,6 @@ impl DataStore {
         for old_meta in meta_to_update {
             self.remove_reference_from_storage(&old_meta).await;
         }
-        println!("{}", self.memtable.references());
         assert!(self.memtable.references() == 0);
         self.memtable.truncate();
     }
@@ -296,22 +289,22 @@ mod tests {
             let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
             storage.init().await;
             storage.truncate().await;
-            let opt = storage.get("test").await;
+            let opt = storage.get(&Key::new("test".to_string())).await;
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
 
             storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes()))).await;
-            let opt = storage.get("test1").await;
+            let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo1");
             storage.get_stats().assert_not_corrupted();
 
             storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes()))).await;
-            let opt = storage.get("test2").await;
+            let opt = storage.get(&Key::new("test2".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo2");
             storage.get_stats().assert_not_corrupted();
 
             storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes()))).await;
-            let opt = storage.get("test3").await;
+            let opt = storage.get(&Key::new("test3".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo99");
             storage.get_stats().assert_not_corrupted();
 
@@ -320,45 +313,45 @@ mod tests {
 
             storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes()))).await;
 
-            let opt = storage.get("test1").await;
+            let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo3");
             storage.get_stats().assert_not_corrupted();
 
-            let opt = storage.get("test99999").await; // unknown key
+            let opt = storage.get(&Key::new("test99999".to_string())).await; // unknown key
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
 
-            storage.delete("test3").await;
-            let opt = storage.get("test3").await;
+            storage.delete(&Key::new("test3".to_string())).await;
+            let opt = storage.get(&Key::new("test3".to_string())).await;
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
             storage.force_flush().await;
             storage.get_stats().assert_not_corrupted();
             println!("{:?}", storage.get_stats());
 
-            let opt = storage.get("test1").await;
+            let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo3");
 
             let mut storage2 = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
             storage2.init().await;
             storage2.get_stats().assert_not_corrupted();
 
-            let opt = storage2.get("test1").await;
+            let opt = storage2.get(&Key::new("test1".to_string())).await;
             assert!(opt.is_none());
             storage2.get_stats().assert_not_corrupted();
 
             storage2.rebuild_index_from_disk().await;
             storage2.get_stats().assert_not_corrupted();
 
-            let opt = storage2.get("test1").await;
+            let opt = storage2.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo3");
 
-            let opt = storage2.get("test2").await;
+            let opt = storage2.get(&Key::new("test2".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo2");
             storage2.get_stats().assert_not_corrupted();
 
             // Should have been deleted
-            let opt = storage2.get("test3").await;
+            let opt = storage2.get(&Key::new("test3".to_string())).await;
             assert!(opt.is_none());
             storage2.get_stats().assert_not_corrupted();
 
@@ -371,13 +364,13 @@ mod tests {
             storage2.table_manager.delete_disktables_marked_for_deletion();
             storage2.get_stats().assert_not_corrupted();
 
-            let opt = storage.get("test1").await;
+            let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo3");
 
-            let opt = storage.get("test2").await;
+            let opt = storage.get(&Key::new("test2".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo2");
 
-            let opt = storage2.get("test3").await;
+            let opt = storage2.get(&Key::new("test3".to_string())).await;
             assert!(opt.is_none());
 
             println!("{:?}", storage.get_stats());
@@ -428,8 +421,8 @@ mod tests {
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
 
             // if we delete all data in a disktable, it should be ready for deletion
-            storage.delete("test6").await;
-            storage.delete("test7").await;
+            storage.delete(&Key::new("test6".to_string())).await;
+            storage.delete(&Key::new("test7".to_string())).await;
             storage.force_flush().await;
             assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
             storage.table_manager.delete_disktables_marked_for_deletion();

@@ -1,13 +1,29 @@
 use futures::{AsyncReadExt, AsyncWriteExt};
-use std::{time::Duration};
+use std::time::Duration;
 pub mod server;
 
-use glommio::{net::TcpStream, timer::sleep};
+use glommio::{net::TcpStream, timer::sleep, GlommioError};
+
+use crate::{
+    api::{self},
+    record::{Key, Record},
+};
 
 #[derive(Debug, Clone)]
 pub enum Command {
     Set(Set),
     Get(Get),
+}
+
+impl Command {
+    pub fn to_api_command(self) -> api::Command {
+        match self {
+            Command::Set(s) => api::Command::Set(api::Set {
+                record: Record::new(s.key, s.data),
+            }),
+            Command::Get(g) => api::Command::Get(api::Get { key: Key::new(g.key) }),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +37,28 @@ impl Response {
         match self {
             Response::Set(s) => s.to_bytes(),
             Response::Get(g) => g.to_bytes(),
+        }
+    }
+
+    pub fn from_api_response(response: api::Response) -> Response {
+        match response {
+            api::Response::Get(g) => {
+                let maybe_value = match g.record {
+                    Some(r) => Some(r.value),
+                    None => None,
+                };
+                Response::Get(GetResp {
+                    flags: 0,
+                    opcode: OpCode::NoError,
+                    cas: 0,
+                    value: maybe_value,
+                })
+            }
+            api::Response::Delete(_) => todo!(),
+            api::Response::Set(_s) => Response::Set(SetResp {
+                opcode: OpCode::NoError,
+                cas: 0,
+            }),
         }
     }
 }
@@ -58,15 +96,15 @@ const SET: u8 = 0x1;
 
 #[derive(Debug, Clone)]
 pub struct Set {
-    key: String,
-    flags: u32,
-    exptime: u32,
-    data: Vec<u8>,
+    pub key: String,
+    pub flags: u32,
+    pub exptime: u32,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Get {
-    key: String,
+    pub key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -128,7 +166,6 @@ impl GetResp {
             Some(v) => resp.extend(v.clone()),
             None => (),
         };
-        println!("{:?}", resp);
         resp
     }
 }
@@ -323,7 +360,7 @@ impl MemcachedBinaryHandler {
         Some(Get { key })
     }
 
-    pub async fn await_new_data(&mut self) {
+    pub async fn await_new_data(&mut self) -> Result<(), GlommioError<()>> {
         // TODO: Make this a future
         let mut buffer = [0u8; 24];
         loop {
@@ -331,10 +368,10 @@ impl MemcachedBinaryHandler {
             match res {
                 Ok(b) => {
                     if b > 0 {
-                        return;
+                        return Ok(());
                     }
                 }
-                Err(r) => panic!("{:?}", r),
+                Err(r) => return Err(r),
             }
             sleep(Duration::from_millis(1)).await;
         }
@@ -344,8 +381,6 @@ impl MemcachedBinaryHandler {
         let mut header_buff = [0u8; 24];
         self.stream.read_exact(&mut header_buff).await.unwrap();
         let header = Header::from_be_bytes(header_buff);
-        println!("{:?}", header);
-        println!("{:?}", header.get_data_length());
         match header.opcode {
             SET => Some(Command::Set(self.parse_set(&header).await.unwrap())),
             GET => Some(Command::Get(self.parse_get(&header).await.unwrap())),

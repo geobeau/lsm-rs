@@ -25,7 +25,7 @@ impl MemTable {
     pub fn append(&self, record: Record) {
         let size = record.size_of();
         let mut mutable_stats = self.stats.borrow_mut();
-        if let Some(old) = self.buffer.borrow_mut().insert(record.hash, record) {
+        if let Some(old) = self.buffer.borrow_mut().insert(record.key.hash, record) {
             mutable_stats.bytes -= old.size_of();
         }
         mutable_stats.references += 1;
