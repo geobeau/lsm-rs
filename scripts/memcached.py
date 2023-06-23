@@ -19,4 +19,9 @@ value = mc.get("foo")
 print(value)
 assert value == "bar"
 
+
+value = mc.get("test1")
+value = mc.get("test2")
+value = mc.get("test3")
+value = mc.get("test4")
 print("done")

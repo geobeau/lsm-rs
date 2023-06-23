@@ -24,10 +24,22 @@ pub fn hash_sha1_bytes(key: &[u8]) -> HashedKey {
 
 #[derive(Debug, Clone)]
 pub struct Record {
-    pub key: String,
+    pub key: Key,
     pub value: Vec<u8>,
-    pub hash: HashedKey,
     pub timestamp: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Key {
+    pub string: String,
+    pub hash: HashedKey,
+}
+
+impl Key {
+    pub fn new(key: String) -> Key {
+        let hash = hash_sha1(&key);
+        Key { string: key, hash }
+    }
 }
 
 impl Record {
@@ -37,11 +49,14 @@ impl Record {
     }
 
     pub fn new_with_timestamp(key: String, value: Vec<u8>, timestamp: u64) -> Record {
-        let hash = hash_sha1(&key);
-        Record { key, value, hash, timestamp }
+        Record {
+            key: Key::new(key),
+            value,
+            timestamp,
+        }
     }
 
     pub fn size_of(&self) -> usize {
-        2 + 4 + 8 + self.key.len() + self.value.len()
+        2 + 4 + 8 + self.key.string.len() + self.value.len()
     }
 }

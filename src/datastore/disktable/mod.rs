@@ -4,7 +4,7 @@ use glommio::sync::RwLock;
 use std::cell::{Cell, RefCell};
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
-use crate::record::{hash_sha1_bytes, Record};
+use crate::record::{hash_sha1_bytes, Key, Record};
 
 use super::{memtable::MemTable, RecordMetadata};
 
@@ -54,15 +54,15 @@ impl DiskTable {
         memtable.values().iter().for_each(|r| {
             offsets.push(RecordMetadata {
                 data_ptr: super::RecordPtr::DiskTable((name.clone(), buf.len() as u32)),
-                key_size: r.key.len() as u16,
+                key_size: r.key.string.len() as u16,
                 value_size: r.value.len() as u32,
                 timestamp: r.timestamp,
-                hash: r.hash,
+                hash: r.key.hash,
             });
-            buf.extend((r.key.len() as u16).to_le_bytes());
+            buf.extend((r.key.string.len() as u16).to_le_bytes());
             buf.extend((r.value.len() as u32).to_le_bytes());
             buf.extend(r.timestamp.to_le_bytes());
-            buf.extend(r.key.as_bytes());
+            buf.extend(r.key.string.as_bytes());
             buf.extend(r.value.clone());
             count += 1;
             references += 1;
@@ -105,14 +105,12 @@ impl DiskTable {
 
     pub async fn read_all_metadata(&self) -> Vec<RecordMetadata> {
         let fd = self.fd.write().await.unwrap();
-        println!("Reading metadata from: {}", self.name);
         let mut stream = fd.stream_reader().build();
         let mut header_buffer = [0u8; 10];
         stream.read_exact(&mut header_buffer).await.unwrap();
         let count = u16::from_le_bytes(header_buffer[0..2].try_into().unwrap());
 
         let mut meta = Vec::with_capacity(count as usize);
-        println!("{:?}", header_buffer);
         let mut cursor = 10;
         let mut record_metadata_buffer = [0u8; 14];
         for _ in 0..count {
@@ -139,7 +137,6 @@ impl DiskTable {
 
     pub async fn read_all_data(&self) -> Vec<(Record, RecordMetadata)> {
         let fd = self.fd.write().await.unwrap();
-        println!("Reading data from: {}", self.name);
         let mut stream = fd.stream_reader().build();
         let mut header_buffer = [0u8; 10];
         stream.read_exact(&mut header_buffer).await.unwrap();
@@ -147,30 +144,22 @@ impl DiskTable {
         let mut record_metadata_buffer = [0u8; 14];
 
         let mut meta = Vec::with_capacity(count as usize);
-        println!("{:?}", header_buffer);
         for _ in 0..count {
             let offset = stream.current_pos();
             stream.read_exact(&mut record_metadata_buffer).await.unwrap();
-            println!("{:?}", record_metadata_buffer);
             let key_size = u16::from_le_bytes(record_metadata_buffer[0..2].try_into().expect("incorrect length"));
             let value_size = u32::from_le_bytes(record_metadata_buffer[2..6].try_into().expect("incorrect length"));
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
-            println!("{}/{}/{}", key_size, value_size, timestamp);
 
-            let mut key = vec![0u8; key_size as usize];
-            stream.read_exact(&mut key).await.unwrap();
+            let mut key_bytes = vec![0u8; key_size as usize];
+            stream.read_exact(&mut key_bytes).await.unwrap();
             let mut value = vec![0u8; value_size as usize];
             stream.read_exact(&mut value).await.unwrap();
 
-            let hash = hash_sha1_bytes(&key);
-
+            let key = Key::new(std::str::from_utf8(&key_bytes).unwrap().to_string());
+            let hash = key.hash;
             meta.push((
-                Record {
-                    hash,
-                    timestamp,
-                    key: std::str::from_utf8(&key).unwrap().to_string(),
-                    value,
-                },
+                Record { timestamp, key, value },
                 RecordMetadata {
                     data_ptr: super::RecordPtr::DiskTable((self.name.clone(), offset as u32)),
                     key_size,
