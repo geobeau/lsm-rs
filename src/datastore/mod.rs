@@ -1,8 +1,10 @@
-use std::{fs, path::PathBuf, rc::Rc};
+use std::{fs, path::PathBuf, rc::Rc, time::Duration};
+
+use glommio::timer::sleep;
 
 use crate::record::{HashedKey, Key, Record};
 
-use self::disktable::ManagerStats;
+use self::{disktable::ManagerStats, memtable::MemTable};
 
 pub mod disktable;
 pub mod index;
@@ -67,7 +69,7 @@ pub struct MemtablePointer {
 
 pub struct DataStore {
     index: index::Index,
-    memtable: memtable::MemTable,
+    memtable_manager: memtable::Manager,
     table_manager: disktable::Manager,
     config: Config,
 }
@@ -98,7 +100,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            memtable_max_size_bytes: 4096, // Should be much higher for a real db
+            memtable_max_size_bytes: 4 * 1024 * 1024, // Should be much higher for a real db
             disktable_target_usage_ratio: 0.7,
         }
     }
@@ -122,6 +124,7 @@ pub struct Stats {
 
 impl Stats {
     fn assert_not_corrupted(&self) {
+        println!("Stats: {:?}", self);
         assert_eq!(self.index_len, self.memtable_refs + self.disktable_refs);
         assert!(self.all_records >= self.index_len);
     }
@@ -136,7 +139,7 @@ impl DataStore {
         fs::create_dir_all(directory.clone()).unwrap();
         DataStore {
             index: index::Index::new(),
-            memtable: memtable::MemTable::new(),
+            memtable_manager: memtable::Manager::new(config.memtable_max_size_bytes),
             table_manager: disktable::Manager::new(directory),
             config,
         }
@@ -148,7 +151,7 @@ impl DataStore {
 
     pub async fn truncate(&mut self) {
         self.index.truncate();
-        self.memtable.truncate();
+        self.memtable_manager.truncate();
         self.table_manager.truncate().await;
     }
 
@@ -172,11 +175,7 @@ impl DataStore {
         let value_size = r.value.len() as u32;
         let timestamp = r.timestamp;
 
-        if !self.memtable.is_empty() && self.memtable.get_byte_size() + r.size_of() > self.config.memtable_max_size_bytes {
-            self.force_flush().await;
-        }
-
-        let ptr = self.memtable.append(r);
+        let ptr = self.memtable_manager.append(r);
 
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(ptr),
@@ -201,8 +200,8 @@ impl DataStore {
         }
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta).await),
-            RecordPtr::MemTable(ptr) => Some(self.memtable.get(&ptr)),
-            RecordPtr::Compacting(ptr) => Some(self.memtable.get(&ptr.to_memtable_pointer())),
+            RecordPtr::MemTable(ptr) => Some(self.memtable_manager.get(&ptr)),
+            RecordPtr::Compacting(ptr) => Some(self.memtable_manager.get(&ptr.to_memtable_pointer())),
         }
     }
 
@@ -219,10 +218,24 @@ impl DataStore {
     }
 
     pub async fn force_flush(&self) {
-        if self.memtable.is_empty() {
+        for memtable in self.memtable_manager.get_all_unflushed_memtables() {
+            self.flush_memtable(&memtable).await
+        }
+    }
+
+    pub async fn flush_all_flushable_memtables(&self) {
+        for memtable in self.memtable_manager.get_all_flushable_memtables() {
+            self.flush_memtable(&memtable).await
+        }
+    }
+
+    pub async fn flush_memtable(&self, memtable: &MemTable) {
+        if memtable.is_empty() {
             return;
         }
-        let offsets = self.table_manager.flush_memtable(&self.memtable).await;
+        self.memtable_manager.mark_memtable_flushing(memtable.id);
+
+        let offsets = self.table_manager.flush_memtable(memtable).await;
         let meta_to_update: Vec<RecordMetadata> = offsets
             .into_iter()
             // Update the index
@@ -231,18 +244,17 @@ impl DataStore {
         for old_meta in meta_to_update {
             self.remove_reference_from_storage(&old_meta).await;
         }
-        println!("self.memtable.references()");
-        assert!(self.memtable.references() == 0);
-        self.memtable.truncate();
+        assert!(memtable.references() == 0);
+        self.memtable_manager.truncate_memtable(memtable.id);
     }
 
     async fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
         match &meta.data_ptr {
-            RecordPtr::DiskTable(ptr) => self.table_manager.remove_reference_from_storage(&ptr.disktable).await,
-            RecordPtr::MemTable(_) => self.memtable.decr_references(1),
+            RecordPtr::DiskTable(ptr) => self.table_manager.remove_reference_from_storage(&ptr.disktable),
+            RecordPtr::MemTable(ptr) => self.memtable_manager.remove_reference_from_memtable(&ptr),
             RecordPtr::Compacting(ptr) => {
-                self.table_manager.remove_reference_from_storage(&ptr.disktable).await;
-                self.memtable.decr_references(1);
+                self.table_manager.remove_reference_from_storage(&ptr.disktable);
+                self.memtable_manager.remove_reference_from_memtable(&ptr.to_memtable_pointer());
             }
         };
     }
@@ -265,7 +277,7 @@ impl DataStore {
                     self.index.delete(&meta);
                     return None;
                 }
-                let memtable_ptr = self.memtable.append(record);
+                let memtable_ptr = self.memtable_manager.append(record);
                 if let RecordPtr::DiskTable(ptr) = meta.data_ptr {
                     meta.data_ptr = RecordPtr::Compacting(HybridPointer { disktable: ptr.disktable, d_offset: ptr.offset, memtable: memtable_ptr.memtable, m_offset: memtable_ptr.offset })
                 }
@@ -278,8 +290,9 @@ impl DataStore {
         }
     }
 
-    pub async fn maybe_run_one_reclaim(&mut self) {
-        if let Some(n) = self.table_manager.get_best_table_to_reclaim().await {
+    pub async fn maybe_run_one_reclaim(&self) {
+        if let Some(n) = self.table_manager.get_best_table_to_reclaim() {
+            println!("Reclaiming {}", n);
             self.reclaim_disktable(&n).await;
         }
     }
@@ -294,10 +307,10 @@ impl DataStore {
     pub fn get_stats(&self) -> Stats {
         Stats {
             index_len: self.index.len(),
-            memtable_refs: self.memtable.references(),
+            memtable_refs: self.memtable_manager.references(),
             disktable_refs: self.table_manager.references(),
             disktable_manager_stats: self.table_manager.get_stats(),
-            all_records: self.memtable.len() + self.table_manager.len(),
+            all_records: self.memtable_manager.len() + self.table_manager.len(),
         }
     }
 }

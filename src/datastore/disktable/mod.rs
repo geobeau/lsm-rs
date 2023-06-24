@@ -174,7 +174,7 @@ impl DiskTable {
         meta
     }
 
-    async fn decr_reference(&self) {
+    fn decr_reference(&self) {
         self.references.set(self.references.get() - 1);
         if self.references.get() == 0 {
             self.deletion_marker.set(true)
@@ -253,7 +253,10 @@ impl Manager {
 
     pub async fn get(&self, meta: &RecordMetadata) -> Record {
         match &meta.data_ptr {
-            super::RecordPtr::DiskTable(ptr) => self.tables.borrow().get(&ptr.disktable).unwrap().get(meta, ptr.offset).await,
+            super::RecordPtr::DiskTable(ptr) => {
+                let disk = self.tables.borrow().get(&ptr.disktable).unwrap().clone();
+                disk.get(meta, ptr.offset).await
+            },
             _ => panic!("Trying to query disk with a non disk pointer"),
         }
     }
@@ -269,8 +272,8 @@ impl Manager {
         offsets
     }
 
-    pub async fn remove_reference_from_storage(&self, table: &Rc<String>) {
-        self.tables.borrow_mut().get_mut(table).unwrap().decr_reference().await
+    pub fn remove_reference_from_storage(&self, table: &Rc<String>) {
+        self.tables.borrow_mut().get_mut(table).unwrap().decr_reference()
     }
 
     pub fn get_disktables_marked_for_deletion(&self) -> Vec<Rc<String>> {
@@ -323,7 +326,7 @@ impl Manager {
         self.oldest_table.get()
     }
 
-    pub async fn get_best_table_to_reclaim(&self) -> Option<Rc<String>> {
+    pub fn get_best_table_to_reclaim(&self) -> Option<Rc<String>> {
         // TODO: Make ratio configurable
         let target_ratio = 0.7;
         self.tables
