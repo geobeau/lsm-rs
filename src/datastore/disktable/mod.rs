@@ -6,6 +6,7 @@ use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
 use crate::record::{hash_sha1_bytes, Key, Record};
 
+use super::DiskPointer;
 use super::{memtable::MemTable, RecordMetadata};
 
 /// Represent an on-disk table
@@ -53,7 +54,7 @@ impl DiskTable {
         buf.extend(crate::time::now().to_le_bytes());
         memtable.values().iter().for_each(|r| {
             offsets.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((name.clone(), buf.len() as u32)),
+                data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: name.clone(), offset: buf.len() as u32 }),
                 key_size: r.key.string.len() as u16,
                 value_size: r.value.len() as u32,
                 timestamp: r.timestamp,
@@ -111,7 +112,7 @@ impl DiskTable {
         let count = u16::from_le_bytes(header_buffer[0..2].try_into().unwrap());
 
         let mut meta = Vec::with_capacity(count as usize);
-        let mut cursor = 10;
+        let mut cursor: usize = 10;
         let mut record_metadata_buffer = [0u8; 14];
         for _ in 0..count {
             stream.read_exact(&mut record_metadata_buffer).await.unwrap();
@@ -123,7 +124,7 @@ impl DiskTable {
             stream.skip(value_size as u64);
 
             meta.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable((self.name.clone(), cursor as u32)),
+                data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: self.name.clone(), offset: cursor as u32 }),
                 key_size,
                 value_size,
                 hash: hash_sha1_bytes(&key),
@@ -161,7 +162,7 @@ impl DiskTable {
             meta.push((
                 Record { timestamp, key, value },
                 RecordMetadata {
-                    data_ptr: super::RecordPtr::DiskTable((self.name.clone(), offset as u32)),
+                    data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: self.name.clone(), offset: offset as u32 }),
                     key_size,
                     value_size,
                     hash,
@@ -252,7 +253,7 @@ impl Manager {
 
     pub async fn get(&self, meta: &RecordMetadata) -> Record {
         match &meta.data_ptr {
-            super::RecordPtr::DiskTable((table_name, offset)) => self.tables.borrow().get(table_name).unwrap().get(meta, *offset).await,
+            super::RecordPtr::DiskTable(ptr) => self.tables.borrow().get(&ptr.disktable).unwrap().get(meta, ptr.offset).await,
             _ => panic!("Trying to query disk with a non disk pointer"),
         }
     }
