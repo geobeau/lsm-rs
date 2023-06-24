@@ -4,12 +4,36 @@ use glommio::channels::channel_mesh::MeshBuilder;
 use glommio::prelude::*;
 
 
+use glommio::timer::sleep;
 use lsm_rs::storageproxy::{CommandHandle, StorageProxy};
 use lsm_rs::{datastore::DataStore, memcached::server::MemcachedBinaryServer};
 use std::rc::Rc;
+use std::time::Duration;
+
+
+pub fn start_compaction_manager(ds: Rc<DataStore>) {
+    glommio::spawn_local(async move {
+        loop {
+            println!("Checking for compaction");
+            ds.maybe_run_one_reclaim().await;
+            sleep(Duration::from_millis(1000)).await
+        }
+    }).detach();
+}
+
+pub fn start_flush_manager(ds: Rc<DataStore>) {
+    glommio::spawn_local(async move {
+        loop {
+            println!("Checking for memtables to flush");
+            ds.flush_all_flushable_memtables().await;
+            sleep(Duration::from_millis(1000)).await
+        }
+    }).detach();
+}
+
 
 fn main() {
-    let nr_shards = 6;
+    let nr_shards = 1;
 
     let mesh_builder: MeshBuilder<CommandHandle, Full> = MeshBuilder::full(nr_shards, 1024);
 
@@ -20,6 +44,8 @@ fn main() {
             let ds = Rc::from(DataStore::new("./data/".into()).await);
             println!("datastore inited");
             let storage_proxy: StorageProxy;
+            start_compaction_manager(ds.clone());
+            start_flush_manager(ds.clone());
 
             if nr_shards > 1 {
                 println!("Mesh mode, initalizing mesh");
