@@ -50,6 +50,15 @@ pub struct HybridPointer {
     m_offset: u16,
 }
 
+impl HybridPointer {
+    pub fn to_memtable_pointer(&self) -> MemtablePointer {
+        MemtablePointer {
+            memtable: self.memtable,
+            offset: self.m_offset
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemtablePointer {
     memtable: u16,
@@ -192,8 +201,8 @@ impl DataStore {
         }
         match meta.data_ptr {
             RecordPtr::DiskTable(_) => Some(self.table_manager.get(&meta).await),
-            RecordPtr::MemTable(_) => Some(self.memtable.get(&meta.hash)),
-            RecordPtr::Compacting(_) => Some(self.memtable.get(&meta.hash)),
+            RecordPtr::MemTable(ptr) => Some(self.memtable.get(&ptr)),
+            RecordPtr::Compacting(ptr) => Some(self.memtable.get(&ptr.to_memtable_pointer())),
         }
     }
 
