@@ -2,6 +2,8 @@ use std::{cell::RefCell, collections::HashMap};
 
 use crate::record::{HashedKey, Record};
 
+use super::MemtablePointer;
+
 pub struct MemTable {
     buffer: RefCell<HashMap<HashedKey, Record>>,
     stats: RefCell<Stats>,
@@ -22,7 +24,7 @@ impl MemTable {
         }
     }
 
-    pub fn append(&self, record: Record) {
+    pub fn append(&self, record: Record) -> MemtablePointer {
         let size = record.size_of();
         let mut mutable_stats = self.stats.borrow_mut();
         if let Some(old) = self.buffer.borrow_mut().insert(record.key.hash, record) {
@@ -30,6 +32,7 @@ impl MemTable {
         }
         mutable_stats.references += 1;
         mutable_stats.bytes += size;
+        return MemtablePointer{memtable: 0, offset: 0}
     }
 
     pub fn get(&self, hash: &HashedKey) -> Record {
@@ -60,7 +63,7 @@ impl MemTable {
         self.buffer.borrow().values().cloned().collect()
     }
 
-    pub fn truncate(&mut self) {
+    pub fn truncate(&self) {
         let mut mutable_stats = self.stats.borrow_mut();
         let mut mutable_buffer = self.buffer.borrow_mut();
         *mutable_buffer = HashMap::new();

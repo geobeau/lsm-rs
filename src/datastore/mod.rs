@@ -30,9 +30,30 @@ impl RecordMetadata {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordPtr {
-    DiskTable((Rc<String>, u32)),
-    Compacting((Rc<String>, u32)),
-    MemTable(()),
+    DiskTable(DiskPointer),
+    Compacting(HybridPointer),
+    MemTable(MemtablePointer),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiskPointer {
+    disktable: Rc<String>,
+    offset: u32
+}
+
+// Not using composition here to have small structure
+#[derive(Debug, Clone, PartialEq)]
+pub struct HybridPointer {
+    disktable: Rc<String>,
+    d_offset: u32,
+    memtable: u16,
+    m_offset: u16,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemtablePointer {
+    memtable: u16,
+    offset: u16
 }
 
 pub struct DataStore {
@@ -142,14 +163,14 @@ impl DataStore {
         let value_size = r.value.len() as u32;
         let timestamp = r.timestamp;
 
-        // if !self.memtable.is_empty() && self.memtable.bytes + r.size_of() > self.config.memtable_max_size_bytes {
-        //     self.force_flush()
-        // }
+        if !self.memtable.is_empty() && self.memtable.get_byte_size() + r.size_of() > self.config.memtable_max_size_bytes {
+            self.force_flush().await;
+        }
 
-        self.memtable.append(r);
+        let ptr = self.memtable.append(r);
 
         let meta = RecordMetadata {
-            data_ptr: RecordPtr::MemTable(()),
+            data_ptr: RecordPtr::MemTable(ptr),
             key_size,
             value_size,
             timestamp,
@@ -188,7 +209,7 @@ impl DataStore {
         }
     }
 
-    pub async fn force_flush(&mut self) {
+    pub async fn force_flush(&self) {
         if self.memtable.is_empty() {
             return;
         }
@@ -201,16 +222,17 @@ impl DataStore {
         for old_meta in meta_to_update {
             self.remove_reference_from_storage(&old_meta).await;
         }
+        println!("self.memtable.references()");
         assert!(self.memtable.references() == 0);
         self.memtable.truncate();
     }
 
     async fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
         match &meta.data_ptr {
-            RecordPtr::DiskTable((table, _)) => self.table_manager.remove_reference_from_storage(table).await,
+            RecordPtr::DiskTable(ptr) => self.table_manager.remove_reference_from_storage(&ptr.disktable).await,
             RecordPtr::MemTable(_) => self.memtable.decr_references(1),
-            RecordPtr::Compacting((table, _)) => {
-                self.table_manager.remove_reference_from_storage(table).await;
+            RecordPtr::Compacting(ptr) => {
+                self.table_manager.remove_reference_from_storage(&ptr.disktable).await;
                 self.memtable.decr_references(1);
             }
         };
@@ -234,10 +256,10 @@ impl DataStore {
                     self.index.delete(&meta);
                     return None;
                 }
-                if let RecordPtr::DiskTable((t, o)) = meta.data_ptr {
-                    meta.data_ptr = RecordPtr::Compacting((t, o))
+                let memtable_ptr = self.memtable.append(record);
+                if let RecordPtr::DiskTable(ptr) = meta.data_ptr {
+                    meta.data_ptr = RecordPtr::Compacting(HybridPointer { disktable: ptr.disktable, d_offset: ptr.offset, memtable: memtable_ptr.memtable, m_offset: memtable_ptr.offset })
                 }
-                self.memtable.append(record);
                 self.index.update(meta)
             })
             .collect();
