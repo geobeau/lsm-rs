@@ -5,7 +5,7 @@ use crate::record::{HashedKey, Record};
 use super::MemtablePointer;
 
 pub struct MemTable {
-    buffer: RefCell<HashMap<HashedKey, Record>>,
+    buffer: RefCell<Vec<Record>>,
     stats: RefCell<Stats>,
 }
 
@@ -19,7 +19,7 @@ struct Stats {
 impl MemTable {
     pub fn new() -> MemTable {
         MemTable {
-            buffer: RefCell::from(HashMap::new()),
+            buffer: RefCell::from(Vec::with_capacity(usize::pow(2, 16))),
             stats: RefCell::from(Stats { references: 0, bytes: 0 }),
         }
     }
@@ -27,16 +27,16 @@ impl MemTable {
     pub fn append(&self, record: Record) -> MemtablePointer {
         let size = record.size_of();
         let mut mutable_stats = self.stats.borrow_mut();
-        if let Some(old) = self.buffer.borrow_mut().insert(record.key.hash, record) {
-            mutable_stats.bytes -= old.size_of();
-        }
+        let mut mutable_buffer = self.buffer.borrow_mut();
+        let offset = mutable_buffer.len();
+        mutable_buffer.push(record);
         mutable_stats.references += 1;
         mutable_stats.bytes += size;
-        return MemtablePointer{memtable: 0, offset: 0}
+        return MemtablePointer{memtable: 0, offset: offset as u16}
     }
 
-    pub fn get(&self, hash: &HashedKey) -> Record {
-        self.buffer.borrow()[hash].clone()
+    pub fn get(&self, ptr: &MemtablePointer) -> Record {
+        self.buffer.borrow()[ptr.offset as usize].clone()
     }
 
     pub fn len(&self) -> usize {
@@ -60,13 +60,12 @@ impl MemTable {
     }
 
     pub fn values(&self) -> Vec<Record> {
-        self.buffer.borrow().values().cloned().collect()
+        self.buffer.borrow().clone()
     }
 
     pub fn truncate(&self) {
         let mut mutable_stats = self.stats.borrow_mut();
-        let mut mutable_buffer = self.buffer.borrow_mut();
-        *mutable_buffer = HashMap::new();
+        self.buffer.borrow_mut().clear();
 
         mutable_stats.bytes = 0;
         mutable_stats.references = 0;
