@@ -124,7 +124,7 @@ pub struct Stats {
 
 impl Stats {
     pub fn assert_not_corrupted(&self) {
-        println!("Stats: {:?}", self);
+        // println!("Stats: {:?}", self);
         assert_eq!(self.index_len, self.memtable_refs + self.disktable_refs);
         assert!(self.all_records >= self.index_len);
     }
@@ -156,7 +156,6 @@ impl DataStore {
     }
 
     pub fn set(&self, record: Record) {
-        // println!("Writing: {}", record.key.string);
         self.set_raw(record);
     }
 
@@ -175,7 +174,16 @@ impl DataStore {
         let value_size = r.value.len() as u32;
         let timestamp = r.timestamp;
 
-        let ptr = self.memtable_manager.append(r);
+        let ptr = match self.index.get(hash) {
+            Some(m) => {
+                match m.data_ptr {
+                    RecordPtr::DiskTable(_) => self.memtable_manager.append(r),
+                    RecordPtr::Compacting(_) => self.memtable_manager.append(r),
+                    RecordPtr::MemTable(ptr) => self.memtable_manager.try_emplace(ptr, r),
+                }
+            },
+            None => self.memtable_manager.append(r),
+        };
 
         let meta = RecordMetadata {
             data_ptr: RecordPtr::MemTable(ptr),
@@ -291,14 +299,12 @@ impl DataStore {
             })
             .collect();
 
-        println!("read done for {} (stale: {})", n, to_remove);
         let mut updated = 0;
         for meta in meta_to_update {
             updated += 1;
             self.remove_reference_from_storage(&meta);
         }
         t.set_as_pending_flush();
-        println!("after removal: {:?} (updated: {})", t.get_stats(), updated);
     }
 
     pub async fn maybe_run_one_reclaim(&self) {
