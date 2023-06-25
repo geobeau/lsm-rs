@@ -37,11 +37,11 @@ impl StorageProxy {
                 Response::Get(GetResp { record })
             }
             Command::Delete(c) => {
-                self.datastore.delete(&c.key).await;
+                self.datastore.delete(&c.key);
                 Response::Delete(DeleteResp {})
             }
             Command::Set(c) => {
-                self.datastore.set(c.record).await;
+                self.datastore.set(c.record);
                 Response::Set(SetResp {})
             }
         }

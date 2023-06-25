@@ -14,9 +14,9 @@ use std::time::Duration;
 pub fn start_compaction_manager(ds: Rc<DataStore>) {
     glommio::spawn_local(async move {
         loop {
-            println!("Checking for compaction");
             ds.maybe_run_one_reclaim().await;
-            sleep(Duration::from_millis(1000)).await
+            ds.get_stats().assert_not_corrupted();
+            sleep(Duration::from_millis(100)).await
         }
     }).detach();
 }
@@ -24,9 +24,9 @@ pub fn start_compaction_manager(ds: Rc<DataStore>) {
 pub fn start_flush_manager(ds: Rc<DataStore>) {
     glommio::spawn_local(async move {
         loop {
-            println!("Checking for memtables to flush");
             ds.flush_all_flushable_memtables().await;
-            sleep(Duration::from_millis(1000)).await
+            ds.clean_unused_disktables().await;
+            sleep(Duration::from_millis(100)).await
         }
     }).detach();
 }

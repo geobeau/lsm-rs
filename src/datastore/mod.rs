@@ -123,7 +123,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn assert_not_corrupted(&self) {
+    pub fn assert_not_corrupted(&self) {
         println!("Stats: {:?}", self);
         assert_eq!(self.index_len, self.memtable_refs + self.disktable_refs);
         assert!(self.all_records >= self.index_len);
@@ -155,21 +155,21 @@ impl DataStore {
         self.table_manager.truncate().await;
     }
 
-    pub async fn set(&self, record: Record) {
-        self.set_raw(record).await;
+    pub fn set(&self, record: Record) {
+        // println!("Writing: {}", record.key.string);
+        self.set_raw(record);
     }
 
-    pub async fn delete(&self, key: &Key) {
+    pub fn delete(&self, key: &Key) {
         let timestamp = crate::time::now();
         self.set_raw(Record {
             key: key.clone(),
             value: vec![],
             timestamp,
-        })
-        .await;
+        });
     }
 
-    async fn set_raw(&self, r: Record) {
+    fn set_raw(&self, r: Record) {
         let hash = r.key.hash;
         let key_size = r.key.string.len() as u16;
         let value_size = r.value.len() as u32;
@@ -186,7 +186,7 @@ impl DataStore {
         };
 
         if let Some(old_meta) = self.index.update(meta) {
-            self.remove_reference_from_storage(&old_meta).await;
+            self.remove_reference_from_storage(&old_meta);
         }
     }
 
@@ -213,8 +213,12 @@ impl DataStore {
             meta_to_update.extend(updates);
         }
         for meta in meta_to_update {
-            self.remove_reference_from_storage(&meta).await;
+            self.remove_reference_from_storage(&meta);
         }
+    }
+
+    pub async fn clean_unused_disktables(&self) {
+        self.table_manager.delete_disktables_marked_for_deletion();
     }
 
     pub async fn force_flush(&self) {
@@ -242,13 +246,13 @@ impl DataStore {
             .filter_map(|m| self.index.update(m))
             .collect();
         for old_meta in meta_to_update {
-            self.remove_reference_from_storage(&old_meta).await;
+            self.remove_reference_from_storage(&old_meta);
         }
         assert!(memtable.references() == 0);
         self.memtable_manager.truncate_memtable(memtable.id);
     }
 
-    async fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
+    fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
         match &meta.data_ptr {
             RecordPtr::DiskTable(ptr) => self.table_manager.remove_reference_from_storage(&ptr.disktable),
             RecordPtr::MemTable(ptr) => self.memtable_manager.remove_reference_from_memtable(&ptr),
@@ -262,6 +266,7 @@ impl DataStore {
     async fn reclaim_disktable(&self, n: &Rc<String>) {
         let t = self.table_manager.get_table(n).unwrap();
         // TODO datastore should not access tables directly
+        let mut to_remove = 0;
         let meta_to_update: Vec<RecordMetadata> = t
             .read_all_data()
             .await
@@ -270,6 +275,7 @@ impl DataStore {
                 if let Some(in_index_meta) = self.index.get(meta.hash) {
                     // Skip record if one is newer in memory
                     if meta.timestamp.lt(&in_index_meta.timestamp) {
+                        to_remove += 1;
                         return Some(meta);
                     }
                 }
@@ -285,9 +291,14 @@ impl DataStore {
             })
             .collect();
 
+        println!("read done for {} (stale: {})", n, to_remove);
+        let mut updated = 0;
         for meta in meta_to_update {
-            self.remove_reference_from_storage(&meta).await;
+            updated += 1;
+            self.remove_reference_from_storage(&meta);
         }
+        t.set_as_pending_flush();
+        println!("after removal: {:?} (updated: {})", t.get_stats(), updated);
     }
 
     pub async fn maybe_run_one_reclaim(&self) {
@@ -337,17 +348,17 @@ mod tests {
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
 
-            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes()))).await;
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
             let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo1");
             storage.get_stats().assert_not_corrupted();
 
-            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes()))).await;
+            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
             let opt = storage.get(&Key::new("test2".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo2");
             storage.get_stats().assert_not_corrupted();
 
-            storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes()))).await;
+            storage.set(Record::new("test3".to_string(), Vec::from("foo99".as_bytes())));
             let opt = storage.get(&Key::new("test3".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo99");
             storage.get_stats().assert_not_corrupted();
@@ -355,7 +366,7 @@ mod tests {
             storage.force_flush().await;
             storage.get_stats().assert_not_corrupted();
 
-            storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes()))).await;
+            storage.set(Record::new("test1".to_string(), Vec::from("foo3".as_bytes())));
 
             let opt = storage.get(&Key::new("test1".to_string())).await;
             assert_value_eq(&opt.unwrap(), "foo3");
@@ -365,7 +376,7 @@ mod tests {
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
 
-            storage.delete(&Key::new("test3".to_string())).await;
+            storage.delete(&Key::new("test3".to_string()));
             let opt = storage.get(&Key::new("test3".to_string())).await;
             assert!(opt.is_none());
             storage.get_stats().assert_not_corrupted();
@@ -429,49 +440,61 @@ mod tests {
             storage.init().await;
             storage.truncate().await;
 
-            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes()))).await;
-            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes()))).await;
-            storage.set(Record::new("test3".to_string(), Vec::from("foo3".as_bytes()))).await;
-            storage.set(Record::new("test4".to_string(), Vec::from("foo4".as_bytes()))).await;
-            storage.set(Record::new("test5".to_string(), Vec::from("foo5".as_bytes()))).await;
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
+            storage.set(Record::new("test1".to_string(), Vec::from("foo1".as_bytes())));
+            storage.set(Record::new("test2".to_string(), Vec::from("foo2".as_bytes())));
+            storage.set(Record::new("test3".to_string(), Vec::from("foo3".as_bytes())));
+            storage.set(Record::new("test4".to_string(), Vec::from("foo4".as_bytes())));
+            storage.set(Record::new("test5".to_string(), Vec::from("foo5".as_bytes())));
             storage.force_flush().await;
 
             storage.get_stats().assert_not_corrupted();
 
+            storage.reclaim_all_disktables().await;
+            storage.get_stats().assert_not_corrupted();
+
             // Try to flush empty memtable: should not add a new disktable
             storage.force_flush().await;
+            storage.table_manager.delete_disktables_marked_for_deletion();
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+            storage.get_stats().assert_not_corrupted();
 
             // Reclaiming with only one table doesn't do anything
             storage.maybe_run_one_reclaim().await;
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 1);
+            storage.get_stats().assert_not_corrupted();
 
-            storage.set(Record::new("test6".to_string(), Vec::from("foo6".as_bytes()))).await;
-            storage.set(Record::new("test7".to_string(), Vec::from("foo7".as_bytes()))).await;
+            storage.set(Record::new("test6".to_string(), Vec::from("foo6".as_bytes())));
+            storage.set(Record::new("test7".to_string(), Vec::from("foo7".as_bytes())));
             storage.force_flush().await;
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
+            storage.get_stats().assert_not_corrupted();
 
             println!("{:?}", storage.get_stats());
             // No reason to make a compaction
             storage.maybe_run_one_reclaim().await;
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
-            storage.set(Record::new("test3".to_string(), Vec::from("foo31".as_bytes()))).await;
-            storage.set(Record::new("test4".to_string(), Vec::from("foo41".as_bytes()))).await;
+            storage.set(Record::new("test3".to_string(), Vec::from("foo31".as_bytes())));
+            storage.set(Record::new("test4".to_string(), Vec::from("foo41".as_bytes())));
 
             storage.maybe_run_one_reclaim().await;
             storage.force_flush().await;
+            storage.get_stats().assert_not_corrupted();
             assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
             storage.table_manager.delete_disktables_marked_for_deletion();
             assert_eq!(storage.get_stats().disktable_manager_stats.table_stats.len(), 2);
 
             // if we delete all data in a disktable, it should be ready for deletion
-            storage.delete(&Key::new("test6".to_string())).await;
-            storage.delete(&Key::new("test7".to_string())).await;
+            storage.delete(&Key::new("test6".to_string()));
+            storage.delete(&Key::new("test7".to_string()));
             storage.force_flush().await;
             assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
             storage.table_manager.delete_disktables_marked_for_deletion();
-
+            storage.get_stats().assert_not_corrupted();
+        
             storage.reclaim_all_disktables().await;
+            storage.get_stats().assert_not_corrupted();
             storage.force_flush().await;
             storage.table_manager.delete_disktables_marked_for_deletion();
             assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 0);

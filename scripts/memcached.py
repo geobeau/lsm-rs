@@ -19,7 +19,7 @@ value = mc.get("foo")
 print(value)
 assert value == "bar"
 
-for i in range(0, 100):
+for i in range(0, 1000):
     val = f"test{i}"
     mc.set(val, val)
     resp = mc.get(val)
