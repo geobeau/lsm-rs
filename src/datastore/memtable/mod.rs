@@ -69,7 +69,7 @@ impl MemTable {
 
     pub fn should_be_flushed(&self) -> bool {
         match self.status.get() {
-            MemtableStatus::Open => true,
+            MemtableStatus::Open => false,
             MemtableStatus::Flushable => true,
             MemtableStatus::Flushing => false,
         }
@@ -128,7 +128,7 @@ impl Manager {
         let mut tables = self.tables.borrow_mut();
         let mut memtable = tables.get(self.cur_memtable.get());
         if memtable.get_byte_size() + record.size_of() > self.memtable_max_size_bytes {
-            println!("Marking as flushable: {}", memtable.get_byte_size());
+            println!("Marking as flushable: {}, {}", memtable.get_byte_size(), memtable.id);
             memtable.status.set(MemtableStatus::Flushable);
             let id = tables.get_next_free();
             self.cur_memtable.set(id);
@@ -156,6 +156,7 @@ impl Manager {
     }
 
     pub fn truncate_memtable(&self, id: u16) {
+        println!("truncating: {id}");
         self.tables.borrow_mut().delete(id)
     }
 

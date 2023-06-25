@@ -27,14 +27,25 @@ pub struct DiskTable {
     /// 0 means that the table is safe for deletion
     references: Cell<u16>,
     /// Mark the disktable for deletion
-    deletion_marker: Cell<bool>,
+    status: Cell<DisktableStatus>,
 }
+
+
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum DisktableStatus {
+    Active,
+    PendingReclaimFlush,
+    PendingDeletion,
+}
+
 
 #[derive(Debug)]
 pub struct DiskTableStats {
     pub usage_ratio: f32,
     pub references: usize,
     pub count: usize,
+    pub status: DisktableStatus,
 }
 
 impl DiskTable {
@@ -79,7 +90,7 @@ impl DiskTable {
                 fd: RwLock::new(sink.seal().await.unwrap()),
                 count: Cell::new(count),
                 references: Cell::new(references),
-                deletion_marker: Cell::new(false),
+                status: Cell::new(DisktableStatus::Active),
             },
             offsets,
         )
@@ -100,7 +111,7 @@ impl DiskTable {
             fd: RwLock::new(fd),
             count: Cell::new(u16::from_le_bytes(buf[0..2].try_into().unwrap())),
             references: Cell::new(0),
-            deletion_marker: Cell::new(false),
+            status: Cell::new(DisktableStatus::Active),
         }
     }
 
@@ -177,8 +188,12 @@ impl DiskTable {
     fn decr_reference(&self) {
         self.references.set(self.references.get() - 1);
         if self.references.get() == 0 {
-            self.deletion_marker.set(true)
+            self.status.set(DisktableStatus::PendingDeletion)
         }
+    }
+
+    pub fn set_as_pending_flush(&self) {
+        self.status.set(DisktableStatus::PendingReclaimFlush)
     }
 
     async fn get(&self, meta: &RecordMetadata, offset: u32) -> Record {
@@ -196,11 +211,12 @@ impl DiskTable {
             usage_ratio: self.references.get() as f32 / self.count.get() as f32,
             references: self.references.get() as usize,
             count: self.count.get() as usize,
+            status: self.status.get(),
         }
     }
 
     pub fn is_marked_for_deletion(&self) -> bool {
-        self.deletion_marker.get()
+        self.status.get() == DisktableStatus::PendingDeletion
     }
 }
 
@@ -264,6 +280,7 @@ impl Manager {
     pub async fn flush_memtable(&self, memtable: &MemTable) -> Vec<RecordMetadata> {
         let now = crate::time::now();
         let name = format!("{}-v1.data", now);
+        println!("Flushing to: {}, {}, {}", name, memtable.len(), memtable.id);
         let mut file_path = self.directory.clone();
         file_path.push(&name);
         let (dt, offsets) = DiskTable::new_from_memtable(Rc::from(name), file_path, now, memtable).await;
@@ -286,7 +303,7 @@ impl Manager {
             .collect()
     }
 
-    pub fn delete_disktables_marked_for_deletion(&mut self) {
+    pub fn delete_disktables_marked_for_deletion(&self) {
         let table_marked_deletion = self.get_disktables_marked_for_deletion();
         let mut tables_mut = self.tables.borrow_mut();
         table_marked_deletion.iter().for_each(|t| {
@@ -297,7 +314,9 @@ impl Manager {
     }
 
     pub fn references(&self) -> usize {
-        self.tables.borrow().values().fold(0, |size, t| size + t.get_stats().references)
+        self.tables.borrow().values()
+        .filter(|d| d.status.get() == DisktableStatus::Active )
+        .fold(0, |size, t| size + t.get_stats().references)
     }
 
     pub fn len(&self) -> usize {
@@ -332,6 +351,7 @@ impl Manager {
         self.tables
             .borrow()
             .iter()
+            .filter(|(_n, t)| t.status.get() == DisktableStatus::Active)
             .find(|(_n, t)| t.get_stats().usage_ratio < target_ratio)
             .map(|(n, _)| n.clone())
     }
