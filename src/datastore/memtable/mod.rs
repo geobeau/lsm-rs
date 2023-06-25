@@ -36,6 +36,16 @@ impl MemTable {
         }
     }
 
+    pub fn emplace(&self, ptr: &MemtablePointer, record: Record) {
+        let mut mutable_stats = self.stats.borrow_mut();
+        let mut mutable_buffer = self.buffer.borrow_mut();
+        let old_record = &mutable_buffer[ptr.offset as usize];
+        mutable_stats.bytes += record.size_of() - old_record.size_of();
+        mutable_buffer[ptr.offset as usize] = record;
+
+        mutable_stats.references += 1;
+    }
+
     pub fn append(&self, record: Record) -> u16 {
         let size = record.size_of();
         let mut mutable_stats = self.stats.borrow_mut();
@@ -122,6 +132,20 @@ impl Manager {
             cur_memtable: Cell::from(id),
             memtable_max_size_bytes,
         }
+    }
+
+    /// Try to replace the record in the memtable if the memtable is not
+    /// already closed
+    pub fn try_emplace(&self, ptr: MemtablePointer, record: Record) -> MemtablePointer {
+        {
+            let tables = self.tables.borrow();
+            let memtable = tables.get(ptr.memtable);
+            if memtable.is_unflushed() {
+                memtable.emplace(&ptr, record);
+                return ptr
+            }
+        }
+        self.append(record)
     }
 
     pub fn append(&self, record: Record) -> MemtablePointer {

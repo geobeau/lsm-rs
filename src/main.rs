@@ -1,3 +1,4 @@
+use glommio::CpuSet;
 use glommio::channels::channel_mesh::Full;
 use glommio::channels::channel_mesh::MeshBuilder;
 
@@ -34,10 +35,11 @@ pub fn start_flush_manager(ds: Rc<DataStore>) {
 
 fn main() {
     let nr_shards = 1;
+    let cpus = CpuSet::online().unwrap();
 
     let mesh_builder: MeshBuilder<CommandHandle, Full> = MeshBuilder::full(nr_shards, 1024);
 
-    LocalExecutorPoolBuilder::new(PoolPlacement::MaxSpread(nr_shards, None))
+    LocalExecutorPoolBuilder::new(PoolPlacement::MaxSpread(nr_shards, core::option::Option::Some(cpus)))
         .on_all_shards(move || async move {
             let id = glommio::executor().id();
             println!("Starting executor {}", id);
