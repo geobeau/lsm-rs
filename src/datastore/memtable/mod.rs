@@ -151,7 +151,8 @@ impl Manager {
     pub fn append(&self, record: Record) -> MemtablePointer {
         let mut tables = self.tables.borrow_mut();
         let mut memtable = tables.get(self.cur_memtable.get());
-        if memtable.get_byte_size() + record.size_of() > self.memtable_max_size_bytes {
+        if (memtable.get_byte_size() + record.size_of() > self.memtable_max_size_bytes)
+            || (memtable.len() >= (u16::MAX as usize - 1)) {
             println!("Marking as flushable: {}, {}", memtable.get_byte_size(), memtable.id);
             memtable.status.set(MemtableStatus::Flushable);
             let id = tables.get_next_free();
