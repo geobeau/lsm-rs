@@ -1,8 +1,9 @@
-use futures::{AsyncReadExt, AsyncWriteExt};
 use std::time::Duration;
 pub mod server;
-
-use glommio::{net::TcpStream, timer::sleep, GlommioError};
+use monoio::{
+    io::{AsyncReadRent, AsyncWriteRentExt, AsyncReadRentExt, BufReader},
+    net::{TcpListener, TcpStream}, time::sleep,
+};
 
 use crate::{
     api::{self},
@@ -230,8 +231,8 @@ impl Header {
         self.body_length as usize - self.key_size as usize - self.extra_size as usize
     }
 
-    fn to_be_bytes(&self) -> [u8; 24] {
-        let mut bytes = [0u8; 24];
+    fn to_be_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0u8; 24];
         bytes[0] = self.magic;
         bytes[1] = self.opcode;
         bytes[2..4].copy_from_slice(&self.key_size.to_be_bytes());
@@ -244,7 +245,7 @@ impl Header {
         bytes
     }
 
-    fn from_be_bytes(bytes: [u8; 24]) -> Header {
+    fn from_be_bytes(bytes: Vec<u8>) -> Header {
         Header {
             magic: bytes[0],
             opcode: bytes[1],
@@ -328,24 +329,22 @@ impl Header {
 // Data type           Reserved for future use (Sean is using this soon).
 
 pub struct MemcachedBinaryHandler {
-    pub stream: TcpStream,
+    pub stream: BufReader<monoio::net::TcpStream>,
 }
 
 impl MemcachedBinaryHandler {
     async fn parse_set(&mut self, header: &Header) -> Option<Set> {
         assert_eq!(header.extra_size, 8u8);
+        let buff = vec![0u8; header.extra_size as usize + header.key_size as usize + header.get_data_length()];
 
-        let mut extra_buf = [0u8; 8];
-        self.stream.read_exact(&mut extra_buf).await.unwrap();
-        let flags = u32::from_be_bytes(extra_buf[0..4].try_into().unwrap());
-        let exptime = u32::from_be_bytes(extra_buf[4..8].try_into().unwrap());
+        let (res, buff) = self.stream.read(buff).await;
+        res.unwrap();
+        let flags = u32::from_be_bytes(buff[0..4].try_into().unwrap());
+        let exptime = u32::from_be_bytes(buff[4..8].try_into().unwrap());
 
-        let mut key_bytes = vec![0u8; header.key_size as usize];
-        let mut data = vec![0u8; header.get_data_length()];
-
-        self.stream.read_exact(&mut key_bytes).await.unwrap();
-        self.stream.read_exact(&mut data).await.unwrap();
-        let key = String::from_utf8(key_bytes.to_owned()).unwrap();
+        let key_end = header.extra_size as usize + header.key_size as usize;
+        let key = String::from_utf8(buff[8..key_end].to_owned()).unwrap();
+        let data = buff[key_end..].to_vec();
 
         Some(Set { key, flags, exptime, data })
     }
@@ -354,42 +353,54 @@ impl MemcachedBinaryHandler {
         assert_eq!(header.extra_size, 0u8);
 
         let mut key_bytes = vec![0u8; header.key_size as usize];
-        self.stream.read_exact(&mut key_bytes).await.unwrap();
+        let (res, key_bytes) = self.stream.read(key_bytes).await;
+        res.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
 
         Some(Get { key })
     }
 
-    pub async fn await_new_data(&mut self) -> Result<(), GlommioError<()>> {
-        // TODO: Make this a future
-        let mut buffer = [0u8; 24];
-        loop {
-            let res = self.stream.peek(&mut buffer).await;
-            match res {
-                Ok(b) => {
-                    if b > 0 {
-                        return Ok(());
-                    }
-                }
-                Err(r) => return Err(r),
-            }
-            sleep(Duration::from_millis(1)).await;
-        }
-    }
+    // pub async fn await_new_data(&mut self) -> Result<(), GlommioError<()>> {
+    //     // TODO: Make this a future
+    //     let mut buffer = [0u8; 24];
+    //     loop {
+    //         let res = self.stream.readable(false).await;
+    //         match res {
+    //             Ok(b) => {
+    //                 if b > 0 {
+    //                     return Ok(());
+    //                 }
+    //             }
+    //             Err(r) => return Err(r),
+    //         }
+    //         sleep(Duration::from_millis(1)).await;
+    //     }
+    // }
 
-    pub async fn decode_command(&mut self) -> Option<Command> {
-        let mut header_buff = [0u8; 24];
-        self.stream.read_exact(&mut header_buff).await.unwrap();
+    pub async fn decode_command(&mut self) -> Result<Command, std::io::Error> {
+        let mut header_buff = vec![0u8; 24];
+        let mut res: Result<usize, std::io::Error>;
+        loop {
+            (res, header_buff) = self.stream.read(header_buff).await;
+            if res? == 0 {
+                panic!("test");
+                sleep(Duration::from_micros(100)).await;
+                continue
+            }
+            break
+        }
+
         let header = Header::from_be_bytes(header_buff);
         match header.opcode {
-            SET => Some(Command::Set(self.parse_set(&header).await.unwrap())),
-            GET => Some(Command::Get(self.parse_get(&header).await.unwrap())),
+            SET => Ok(Command::Set(self.parse_set(&header).await.unwrap())),
+            GET => Ok(Command::Get(self.parse_get(&header).await.unwrap())),
             _ => todo!(),
         }
     }
 
-    pub async fn write_resp(&mut self, buff: &[u8]) {
-        self.stream.write(buff).await.unwrap();
+    pub async fn write_resp(&mut self, buff: Vec<u8>) {
+        let (res, _) = self.stream.write_all(buff).await;
+        res.unwrap();
     }
 }
 

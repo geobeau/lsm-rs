@@ -1,9 +1,7 @@
 use futures::{AsyncReadExt, AsyncWriteExt};
-use glommio::io::{ImmutableFile, ImmutableFileBuilder};
-use glommio::sync::RwLock;
 use std::cell::{Cell, RefCell};
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
-
+use monoio::fs::File;
 use crate::record::{hash_sha1_bytes, Key, Record};
 
 use super::DiskPointer;
@@ -20,7 +18,7 @@ pub struct DiskTable {
     name: Rc<String>,
     path: PathBuf,
     timestamp: u64,
-    fd: RwLock<ImmutableFile>,
+    fd: File,
     /// Count the number of records physically within the disktables
     count: Cell<u16>,
     /// Count the number of references to disktable from the index
@@ -50,11 +48,7 @@ pub struct DiskTableStats {
 
 impl DiskTable {
     pub async fn new_from_memtable(name: Rc<String>, path: PathBuf, timestamp: u64, memtable: &MemTable) -> (DiskTable, Vec<RecordMetadata>) {
-        let mut sink = ImmutableFileBuilder::new(path.clone())
-            .with_pre_allocation(Some(memtable.get_byte_size() as u64))
-            .build_sink()
-            .await
-            .unwrap();
+        let file = File::create(path.clone()).await.unwrap();
 
         let mut offsets = Vec::with_capacity(memtable.len());
         let mut buf: Vec<u8> = Vec::with_capacity(memtable.get_byte_size());
@@ -79,15 +73,18 @@ impl DiskTable {
             count += 1;
             references += 1;
         });
-        sink.write_all(&buf).await.unwrap();
+        let (res, _) = file.write_at(buf, 0).await;
+        res.unwrap();
         memtable.len();
+
+        let file = File::open(path.clone()).await.unwrap();
 
         (
             DiskTable {
                 name,
                 path,
                 timestamp,
-                fd: RwLock::new(sink.seal().await.unwrap()),
+                fd: file,
                 count: Cell::new(count),
                 references: Cell::new(references),
                 status: Cell::new(DisktableStatus::Active),
@@ -99,8 +96,11 @@ impl DiskTable {
     /// Initialize a disktable from an already existing table
     pub async fn new_from_disk(name: Rc<String>, path: PathBuf) -> DiskTable {
         // Open the file and read its disktable metadata
-        let fd = ImmutableFileBuilder::new(path.clone()).build_existing().await.unwrap();
-        let buf = fd.read_at(0, 10).await.unwrap();
+        let fd = File::open(path.clone()).await.unwrap();
+        // TODO find a way to use an array instead
+        let buf = vec![0u8; 10];
+        let (res, buf) = fd.read_at(buf, 0).await;
+        res.unwrap();
         let timestamp = u64::from_le_bytes(buf[2..10].try_into().unwrap());
         crate::time::sync(timestamp);
 
@@ -108,7 +108,7 @@ impl DiskTable {
             name,
             path,
             timestamp,
-            fd: RwLock::new(fd),
+            fd,
             count: Cell::new(u16::from_le_bytes(buf[0..2].try_into().unwrap())),
             references: Cell::new(0),
             status: Cell::new(DisktableStatus::Active),
@@ -116,23 +116,33 @@ impl DiskTable {
     }
 
     pub async fn read_all_metadata(&self) -> Vec<RecordMetadata> {
-        let fd = self.fd.write().await.unwrap();
-        let mut stream = fd.stream_reader().build();
-        let mut header_buffer = [0u8; 10];
-        stream.read_exact(&mut header_buffer).await.unwrap();
+        let mut header_buffer = vec![0u8; 10];
+        let mut record_metadata_buffer = vec![0u8; 14];
+        let mut res;
+
+        let mut stream_cursor = 0;
+        (res, header_buffer) = self.fd.read_exact_at(header_buffer, stream_cursor).await;
+        res.unwrap();
         let count = u16::from_le_bytes(header_buffer[0..2].try_into().unwrap());
 
         let mut meta = Vec::with_capacity(count as usize);
-        let mut cursor: usize = 10;
-        let mut record_metadata_buffer = [0u8; 14];
+
+        let mut cursor: usize = header_buffer.len();
+        stream_cursor += header_buffer.len() as u64;
+
         for _ in 0..count {
-            stream.read_exact(&mut record_metadata_buffer).await.unwrap();
+            println!("Cursor: {}", stream_cursor);
+            (res, record_metadata_buffer) = self.fd.read_exact_at(record_metadata_buffer, stream_cursor).await;
+            res.unwrap();
             let key_size = u16::from_le_bytes(record_metadata_buffer[0..2].try_into().expect("incorrect length"));
             let value_size = u32::from_le_bytes(record_metadata_buffer[2..6].try_into().expect("incorrect length"));
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
             let mut key = vec![0u8; key_size as usize];
-            stream.read_exact(&mut key).await.unwrap();
-            stream.skip(value_size as u64);
+            stream_cursor += record_metadata_buffer.len() as u64;
+            
+            (res, key) = self.fd.read_exact_at(key, stream_cursor).await;
+            res.unwrap();
+            stream_cursor += key_size as u64 + value_size as u64;
 
             meta.push(RecordMetadata {
                 data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: self.name.clone(), offset: cursor as u32 }),
@@ -143,32 +153,54 @@ impl DiskTable {
             });
             self.references.set(self.references.get() + 1);
             cursor += meta.last().unwrap().size_of();
+            assert_eq!(cursor as u64, stream_cursor);
         }
         meta
     }
 
     pub async fn read_all_data(&self) -> Vec<(Record, RecordMetadata)> {
-        let fd = self.fd.write().await.unwrap();
-        let mut stream = fd.stream_reader().build();
-        let mut header_buffer = [0u8; 10];
-        stream.read_exact(&mut header_buffer).await.unwrap();
+        let mut header_buffer = vec![0u8; 10];
+        let mut record_metadata_buffer = vec![0u8; 14];
+        let mut res;
+
+
+        let mut stream_cursor = 0;
+        (res, header_buffer) = self.fd.read_exact_at(header_buffer, stream_cursor).await;
+        res.unwrap();
+
         let count = u16::from_le_bytes(header_buffer[0..2].try_into().unwrap());
-        let mut record_metadata_buffer = [0u8; 14];
+        stream_cursor += header_buffer.len() as u64;
 
         let mut meta = Vec::with_capacity(count as usize);
         for _ in 0..count {
-            let offset = stream.current_pos();
-            stream.read_exact(&mut record_metadata_buffer).await.unwrap();
+            println!("Cursor head: {}", stream_cursor);
+            let offset = stream_cursor as u32;
+            (res, record_metadata_buffer) = self.fd.read_exact_at(record_metadata_buffer, stream_cursor).await;
+            res.unwrap();
             let key_size = u16::from_le_bytes(record_metadata_buffer[0..2].try_into().expect("incorrect length"));
             let value_size = u32::from_le_bytes(record_metadata_buffer[2..6].try_into().expect("incorrect length"));
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
-
             let mut key_bytes = vec![0u8; key_size as usize];
-            stream.read_exact(&mut key_bytes).await.unwrap();
+            println!("read meta: k:{:?} v:{} t:{}", key_size, value_size,timestamp);
+            println!("Cursor key: {} (reading {})", stream_cursor, key_size);
+            stream_cursor += record_metadata_buffer.len() as u64;
+
+            (res, key_bytes) = self.fd.read_exact_at(key_bytes, stream_cursor).await;
+            res.unwrap();
+            stream_cursor += key_size as u64;
+
+            println!("Cursor val: {} (reading {})", stream_cursor, value_size);
+
             let mut value = vec![0u8; value_size as usize];
-            stream.read_exact(&mut value).await.unwrap();
+            (res, value) = self.fd.read_exact_at(value, stream_cursor).await;
+            res.unwrap();
+            stream_cursor += value_size as u64;
+
+
+            println!("Cursor end: {}", stream_cursor);
 
             let key = Key::new(std::str::from_utf8(&key_bytes).unwrap().to_string());
+            println!("read key: {:?}", key.string);
             let hash = key.hash;
             meta.push((
                 Record { timestamp, key, value },
@@ -197,11 +229,12 @@ impl DiskTable {
     }
 
     async fn get(&self, meta: &RecordMetadata, offset: u32) -> Record {
-        let fd = self.fd.write().await.unwrap();
-        let result = fd.read_at(offset as u64, meta.size_of()).await.unwrap();
-        let timestamp = u64::from_le_bytes(result[6..14].try_into().expect("incorrect length"));
-        let key = std::str::from_utf8(&result[14..14 + meta.key_size as usize]).unwrap();
-        let value = Vec::from(&result[14 + meta.key_size as usize..14 + meta.key_size as usize + meta.value_size as usize]);
+        let value_buff = vec![0; meta.size_of()];
+        let (res, value_buff) = self.fd.read_exact_at(value_buff, offset as u64).await;
+        res.unwrap();
+        let timestamp = u64::from_le_bytes(value_buff[6..14].try_into().expect("incorrect length"));
+        let key = std::str::from_utf8(&value_buff[14..14 + meta.key_size as usize]).unwrap();
+        let value = Vec::from(&value_buff[14 + meta.key_size as usize..14 + meta.key_size as usize + meta.value_size as usize]);
 
         Record::new_with_timestamp(key.to_string(), value, timestamp)
     }
@@ -262,7 +295,7 @@ impl Manager {
             // write() is used here because the table is going to be destroyed
             // ensure only one ref is in use (ours)
             assert_eq!(Rc::strong_count(&table), 1);
-            table.fd.close().unwrap();
+            // let res = table.fd.close().await;
             std::fs::remove_file(table.path.clone()).unwrap();
         }
     }

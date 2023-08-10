@@ -1,6 +1,4 @@
-use std::{fs, path::PathBuf, rc::Rc, time::Duration};
-
-use glommio::timer::sleep;
+use std::{fs, path::PathBuf, rc::Rc};
 
 use crate::record::{HashedKey, Key, Record};
 
@@ -334,8 +332,6 @@ impl DataStore {
 
 #[cfg(test)]
 mod tests {
-    use glommio::LocalExecutor;
-
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
@@ -345,8 +341,11 @@ mod tests {
 
     #[test]
     fn test_datastore_for_consistency() {
-        let local_ex = LocalExecutor::default();
-        local_ex.run(async {
+        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
+        .build()
+        .unwrap();
+
+        rt.block_on(async {
             let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
             storage.init().await;
             storage.truncate().await;
@@ -440,8 +439,11 @@ mod tests {
 
     #[test]
     fn test_datastore_for_flush_and_compactions() {
-        let local_ex = LocalExecutor::default();
-        local_ex.run(async {
+        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
+        .build()
+        .unwrap();
+
+        rt.block_on(async {
             let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_flush_and_compactions")).await;
             storage.init().await;
             storage.truncate().await;
