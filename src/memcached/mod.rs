@@ -1,4 +1,4 @@
-use futures::{AsyncReadExt, AsyncWriteExt};
+use futures::{AsyncReadExt, AsyncWriteExt, stream, io::BufReader};
 use std::time::Duration;
 pub mod server;
 
@@ -328,7 +328,7 @@ impl Header {
 // Data type           Reserved for future use (Sean is using this soon).
 
 pub struct MemcachedBinaryHandler {
-    pub stream: TcpStream,
+    pub stream: BufReader<TcpStream>,
 }
 
 impl MemcachedBinaryHandler {
@@ -360,22 +360,22 @@ impl MemcachedBinaryHandler {
         Some(Get { key })
     }
 
-    pub async fn await_new_data(&mut self) -> Result<(), GlommioError<()>> {
-        // TODO: Make this a future
-        let mut buffer = [0u8; 24];
-        loop {
-            let res = self.stream.peek(&mut buffer).await;
-            match res {
-                Ok(b) => {
-                    if b > 0 {
-                        return Ok(());
-                    }
-                }
-                Err(r) => return Err(r),
-            }
-            sleep(Duration::from_millis(1)).await;
-        }
-    }
+    // pub async fn await_new_data(&mut self) -> Result<(), GlommioError<()>> {
+    //     // TODO: Make this a future
+    //     let mut buffer = [0u8; 24];
+    //     loop {
+    //         let res = self.stream.peek(&mut buffer).await;
+    //         match res {
+    //             Ok(b) => {
+    //                 if b > 0 {
+    //                     return Ok(());
+    //                 }
+    //             }
+    //             Err(r) => return Err(r),
+    //         }
+    //         sleep(Duration::from_millis(1)).await;
+    //     }
+    // }
 
     pub async fn decode_command(&mut self) -> Option<Command> {
         let mut header_buff = [0u8; 24];

@@ -1,3 +1,4 @@
+use futures::io::BufReader;
 use glommio::net::TcpListener;
 
 use crate::{
@@ -18,13 +19,14 @@ impl MemcachedBinaryServer {
         loop {
             let stream = listener.accept().await.unwrap();
             let storage_proxy = self.storage_proxy.clone();
+            let reader = BufReader::new(stream);
             glommio::spawn_local(async move {
-                let mut handler = MemcachedBinaryHandler { stream };
+                let mut handler = MemcachedBinaryHandler { stream: reader };
 
                 loop {
-                    if handler.await_new_data().await.is_err() {
-                        return;
-                    }
+                    // if handler.await_new_data().await.is_err() {
+                    //     return;
+                    // }
                     let memcached_command = handler.decode_command().await.unwrap();
                     let resp = storage_proxy.dispatch(memcached_command.to_api_command()).await;
                     handler.write_resp(&Response::from_api_response(resp).to_bytes()).await;
