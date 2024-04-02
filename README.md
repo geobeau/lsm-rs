@@ -1,16 +1,15 @@
 # lsm-rs
 
-Lsm-rs is a database engine that aims at being a high performance key/value store.
-The main features:
-- NVMe ssd first: data structures have been chosen to leverage the properties of NVMe ssd to the maximum (at the expense of hdd)
-- Read optimized: it aims at having low latency (<1ms, 99% of the time) while handling hundreds of thousands of reads per second
-- Support expiration
-- Maybe support eviction
+Lsm-rs is a persisted Key/Value Store that is partially compatible with memcached
 
+It works with a shard per core model (like Scylla).
+At the moment it's using 2 implementations:
+- with bytedance/monoio
+- with datadog/gloomio
 
-It should feature:
-- shart per core model
-- asynchronous I/O with io_uring
+Gloomio implem is able to scale to 600k QPS in 4 cpu mode and 300k QPS in one cpu mode.
+Monoio implem is able to scale 330k QPS but multi cpu is not yet implemented
+
 
 ## Storage architecture
 
