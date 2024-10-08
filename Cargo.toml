@@ -9,9 +9,10 @@ edition = "2021"
 byteorder = "1.5.0"
 futures = "0.3.30"
 rust-crypto = "0.2.36"
-monoio = "0.2.3"
+monoio = "0.2.4"
 # monoio = { path = "../monoio/monoio" }
 monoio-compat = "0.1.2"
+async-trait = "^0.1.81"
 tokio = { version = "1.37.0", features = ["net"] }
 
 [dev-dependencies]
