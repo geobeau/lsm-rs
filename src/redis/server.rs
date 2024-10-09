@@ -58,7 +58,8 @@ impl RESPServer {
                             ClientCmd::SetInfo(set_info_cmd) => Value::HashableValue(HashableValue::String(Cow::from("OK"))),
                         },
                         Command::Set(set_cmd) => {
-                            let resp = storage_proxy.dispatch(set_cmd.to_api_command()).await;
+                            // TODO: should return result
+                            let _ = storage_proxy.dispatch(set_cmd.to_api_command()).await;
                             Value::HashableValue(HashableValue::String(Cow::from("OK")))
                         },
                         Command::Get(get_cmd) => {

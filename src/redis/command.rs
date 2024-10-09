@@ -131,12 +131,10 @@ pub struct RESPHandler {
 impl RESPHandler {
     // pub async fn decode_command(&mut self) -> Result<Command, std::io::Error> {
     pub async fn decode_command(&mut self) -> Result<Command, std::io::Error> {
-        println!("awaiting more data");
         let buffer = self.stream.fill_buf().await.unwrap();
         if buffer.len() == 0 {
             return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "error"))
         }
-        // println!("buffer size: {}, {:?}", buffer.len(), str::from_utf8(buffer));
         let (remaining_buffer, val) = parse(buffer).unwrap();
         let args = match val {
             Value::HashableValue(_) => todo!(),

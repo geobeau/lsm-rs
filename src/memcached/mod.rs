@@ -383,7 +383,7 @@ impl MemcachedBinaryHandler {
         loop {
             (res, header_buff) = self.stream.read(header_buff).await;
             if res? == 0 {
-                panic!("test");
+                panic!("huho");
                 sleep(Duration::from_micros(100)).await;
                 continue
             }
