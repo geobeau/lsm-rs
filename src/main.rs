@@ -1,6 +1,8 @@
+use lsm_rs::memcached::server::MemcachedBinaryServer;
 use lsm_rs::redis::server::RESPServer;
-use lsm_rs::storageproxy::{CommandHandle, StorageProxy};
+use lsm_rs::storageproxy::StorageProxy;
 use lsm_rs::datastore::DataStore;
+use monoio::join;
 use monoio::time::sleep;
 use std::rc::Rc;
 use std::time::Duration;
@@ -72,15 +74,16 @@ fn main() {
                 };
             }
 
-            let s = RESPServer {
+            let resp = RESPServer {
                 host_port: "127.0.0.1:6379".to_string(),
-                storage_proxy,
+                storage_proxy: storage_proxy.clone(),
             };
-            // let s = MemcachedBinaryServer {
-            //     host_port: "127.0.0.1:11211".to_string(),
-            //     storage_proxy,
-            // };
-            s.listen().await;
+            let memcached = MemcachedBinaryServer {
+                host_port: "127.0.0.1:11211".to_string(),
+                storage_proxy: storage_proxy.clone(),
+            };
+            
+            join!(resp.listen(), memcached.listen());
             println!("Terminated");
         });
 }
