@@ -48,7 +48,7 @@ impl RESPServer {
                                 (HashableValue::String(Cow::from("version")), Value::HashableValue(HashableValue::String(Cow::from("0")))),
                                 (HashableValue::String(Cow::from("proto")), Value::HashableValue(HashableValue::Integer(3))),
                                 (HashableValue::String(Cow::from("id")), Value::HashableValue(HashableValue::Integer(0))),
-                                (HashableValue::String(Cow::from("mode")), Value::HashableValue(HashableValue::String(Cow::from("standalone")))),
+                                (HashableValue::String(Cow::from("mode")), Value::HashableValue(HashableValue::String(Cow::from("cluster")))),
                                 (HashableValue::String(Cow::from("modules")), Value::Null),
                                 ])
                             ))
@@ -99,13 +99,13 @@ impl RESPServer {
                                         Value::HashableValue(HashableValue::Integer(16384)),
                                         // Primary node
                                         Value::NonHashableValue(NonHashableValue::Array(vec![
-                                            Value::HashableValue(HashableValue::String(Cow::from("127.0.0.1"))),
+                                            Value::HashableValue(HashableValue::Blob("127.0.0.1".as_bytes())),
                                             Value::HashableValue(HashableValue::Integer(6379)),
                                             Value::HashableValue(HashableValue::String(Cow::from("821d8ca00d7ccf931ed3ffc7e3db0599d2271abf"))),
 
                                             Value::NonHashableValue(NonHashableValue::Array(vec![
                                                 Value::HashableValue(HashableValue::String(Cow::from("hostname"))),
-                                                Value::HashableValue(HashableValue::String(Cow::from("localhost"))),
+                                                Value::HashableValue(HashableValue::String(Cow::from("127.0.0.1"))),
                                             ])),
                                         ])),
                                     ]))
@@ -163,7 +163,7 @@ impl RESPServer {
 
                     let mut resp_bytes = vec![];
                     redis_value_to_bytes(&resp, &mut resp_bytes);
-                    println!("Answering: {:?}", str::from_utf8(&resp_bytes).unwrap());
+                    // println!("Answering: {:?}", str::from_utf8(&resp_bytes).unwrap());
                     handler.write_resp(resp_bytes).await;
                 }
             });
