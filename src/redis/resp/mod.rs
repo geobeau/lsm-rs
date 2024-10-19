@@ -49,7 +49,7 @@ pub fn redis_non_hashable_value_to_bytes(value: &NonHashableValue, buffer: &mut 
             buffer.extend_from_slice(vec.len().to_string().as_str().as_bytes());
             buffer.extend_from_slice(SEPARATOR);
             vec.iter().for_each(|val| redis_value_to_bytes(val, buffer));
-            buffer.extend_from_slice(SEPARATOR);
+            // buffer.extend_from_slice(SEPARATOR);
         },
         NonHashableValue::Float(_) => todo!(),
         NonHashableValue::Map(map) => {

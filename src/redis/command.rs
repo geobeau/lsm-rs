@@ -11,6 +11,8 @@ use super::resp::{HashableValue, Value};
 pub enum Command {
     Hello(HelloCmd),
     Client(ClientCmd),
+    Cluster(ClusterCmd),
+    Command(),
     Set(SetCmd),
     Get(GetCmd),
 }
@@ -120,6 +122,34 @@ fn parse_get_command(args: &[Value]) -> Command {
     })
 }
 
+#[derive(Debug, Clone)]
+pub enum ClusterCmd {
+    Slots(),
+    Info(),
+    // SetInfo(SetInfoCmd)
+}
+
+const CMD_CLUSTER_SLOT: &str = "SLOTS";
+const CMD_CLUSTER_INFO: &str = "INFO";
+
+const CMD_CLUSTER: &str = "CLUSTER";
+fn parse_cluster_command(args: &[Value]) -> Command {
+    let sub_command = args[1].try_as_str().unwrap();
+    match sub_command {
+        CMD_CLUSTER_SLOT => Command::Cluster(ClusterCmd::Slots()),
+        CMD_CLUSTER_INFO => Command::Cluster(ClusterCmd::Info()),
+        _ => todo!()
+    }
+}
+
+
+const CMD_COMMAND: &str = "COMMAND";
+fn parse_command_command(args: &[Value]) -> Command {
+    Command::Command()
+}
+
+
+
 
 pub struct RESPHandler {
     pub stream: BufReader<monoio::net::TcpStream>,
@@ -133,7 +163,7 @@ impl RESPHandler {
     pub async fn decode_command(&mut self) -> Result<Command, std::io::Error> {
         let buffer = self.stream.fill_buf().await.unwrap();
         if buffer.len() == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "error"))
+            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "empty buffer"))
         }
         let (remaining_buffer, val) = parse(buffer).unwrap();
         let args = match val {
@@ -160,6 +190,8 @@ impl RESPHandler {
             CMD_CLIENT => parse_client_command(&args),
             CMD_SET => parse_set_command(&args),
             CMD_GET => parse_get_command(&args),
+            CMD_CLUSTER => parse_cluster_command(&args),
+            CMD_COMMAND => parse_command_command(&args),
             unsuported_cmd => panic!("Command not supported: {}", unsuported_cmd)
         };
         

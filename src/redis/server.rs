@@ -1,5 +1,5 @@
 use core::str;
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, vec};
 
 use monoio::{io::BufReader, net::TcpListener};
 
@@ -74,11 +74,96 @@ impl RESPServer {
                                 panic!("Unexpected response")
                             }
                         },
+                        Command::Cluster(cluster_cmd) => {
+                            match cluster_cmd {
+                                crate::redis::command::ClusterCmd::Info() => 
+                                Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
+                                    (HashableValue::String(Cow::from("cluster_state")), Value::HashableValue(HashableValue::String(Cow::from("ok")))),
+                                    (HashableValue::String(Cow::from("cluster_slots_assigned")), Value::HashableValue(HashableValue::Integer(16384))),
+                                    (HashableValue::String(Cow::from("cluster_slots_ok")), Value::HashableValue(HashableValue::Integer(16384))),
+                                    (HashableValue::String(Cow::from("cluster_slots_pfail")), Value::HashableValue(HashableValue::Integer(0))),
+                                    (HashableValue::String(Cow::from("cluster_slots_fail")), Value::HashableValue(HashableValue::Integer(0))),
+                                    (HashableValue::String(Cow::from("cluster_known_nodes")), Value::HashableValue(HashableValue::Integer(1))),
+                                    (HashableValue::String(Cow::from("cluster_size")), Value::HashableValue(HashableValue::Integer(1))),
+                                    (HashableValue::String(Cow::from("cluster_current_epoch")), Value::HashableValue(HashableValue::Integer(1))),
+                                    (HashableValue::String(Cow::from("cluster_my_epoch")), Value::HashableValue(HashableValue::Integer(1))),
+                                    ])
+                                )),
+                                crate::redis::command::ClusterCmd::Slots() =>  
+                                Value::NonHashableValue(NonHashableValue::Array(vec![
+                                    // Each node
+                                    Value::NonHashableValue(NonHashableValue::Array(vec![
+                                        // Range start
+                                        Value::HashableValue(HashableValue::Integer(0)),
+                                        // Range end
+                                        Value::HashableValue(HashableValue::Integer(16384)),
+                                        // Primary node
+                                        Value::NonHashableValue(NonHashableValue::Array(vec![
+                                            Value::HashableValue(HashableValue::String(Cow::from("127.0.0.1"))),
+                                            Value::HashableValue(HashableValue::Integer(6379)),
+                                            Value::HashableValue(HashableValue::String(Cow::from("821d8ca00d7ccf931ed3ffc7e3db0599d2271abf"))),
+
+                                            Value::NonHashableValue(NonHashableValue::Array(vec![
+                                                Value::HashableValue(HashableValue::String(Cow::from("hostname"))),
+                                                Value::HashableValue(HashableValue::String(Cow::from("localhost"))),
+                                            ])),
+                                        ])),
+                                    ]))
+                                ])),
+                            }
+                        },
+                        Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
+                            // TODO: get that through reflection
+                            Value::NonHashableValue(NonHashableValue::Array(vec![
+                                // Name
+                                Value::HashableValue(HashableValue::String(Cow::from("SET"))),
+                                // Arity is the number of arguments a command expects
+                                Value::HashableValue(HashableValue::Integer(3)),
+                                // Flags
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // First key
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // Last Key
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // Step
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // ACLs categories
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Tips
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Key specs
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Sub commands
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                            ])),
+                            Value::NonHashableValue(NonHashableValue::Array(vec![
+                                // Name
+                                Value::HashableValue(HashableValue::String(Cow::from("GET"))),
+                                // Arity is the number of arguments a command expects
+                                Value::HashableValue(HashableValue::Integer(2)),
+                                // Flags
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // First key
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // Last Key
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // Step
+                                Value::HashableValue(HashableValue::Integer(1)),
+                                // ACLs categories
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Tips
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Key specs
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                                // Sub commands
+                                Value::NonHashableValue(NonHashableValue::Array(vec![])),
+                            ])),
+                        ])),
                     };
 
                     let mut resp_bytes = vec![];
                     redis_value_to_bytes(&resp, &mut resp_bytes);
-                    // println!("Answering: {:?}", str::from_utf8(&resp_bytes).unwrap());
+                    println!("Answering: {:?}", str::from_utf8(&resp_bytes).unwrap());
                     handler.write_resp(resp_bytes).await;
                 }
             });
