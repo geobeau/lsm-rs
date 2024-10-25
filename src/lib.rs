@@ -5,3 +5,4 @@ pub mod redis;
 pub mod record;
 pub mod storageproxy;
 pub mod time;
+pub mod topology;

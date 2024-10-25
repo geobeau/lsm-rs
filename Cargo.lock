@@ -471,6 +471,7 @@ dependencies = [
  "byteorder",
  "criterion",
  "futures",
+ "io-uring",
  "monoio 0.2.4",
  "monoio-compat",
  "rand 0.8.5",
@@ -532,8 +533,6 @@ dependencies = [
 [[package]]
 name = "monoio"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bd0f8bcde87b1949f95338b547543fcab187bc7e7a5024247e359a5e828ba6a"
 dependencies = [
  "auto-const-array",
  "bytes",
@@ -563,8 +562,6 @@ dependencies = [
 [[package]]
 name = "monoio-macros"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "176a5f5e69613d9e88337cf2a65e11135332b4efbcc628404a7c555e4452084c"
 dependencies = [
  "proc-macro2",
  "quote",
