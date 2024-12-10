@@ -3,36 +3,42 @@ use std::{borrow::Cow, collections::HashMap, vec};
 
 use monoio::{io::BufReader, net::TcpListener};
 
-use crate::{api, record, redis::{command::{ClientCmd, Command, RESPHandler}, resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value}}, storageproxy::StorageProxy, topology::{self, Topology}};
+use crate::{api, cluster::{self, Cluster}, reactor, record, redis::{command::{ClientCmd, Command, RESPHandler}, resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value}}, storageproxy::StorageProxy};
 
 
 // Serve the Redis serialization protocol (RESP)
 pub struct RESPServer {
     pub host_port: String,
     pub storage_proxy: StorageProxy,
-    pub topology: Topology
+    pub cluster: Cluster
 }
 
-fn topology_as_slots(topology: &Topology) -> Value {
-    let slots = topology.shards.iter().map(|(_, shard)| {
+fn cluster_as_slots(cluster: &Cluster) -> Value {
+    let slots = cluster.reactor_allocations.iter()
+    .map(|(reactor, ranges)| {
+        let resp_ranges: Vec<Value> = ranges.iter().map(|range| {
         Value::NonHashableValue(NonHashableValue::Array(vec![
             // Range start
-            Value::HashableValue(HashableValue::Integer(shard.range.start as i64)),
+            Value::HashableValue(HashableValue::Integer(range.start as i64)),
             // Range end
-            Value::HashableValue(HashableValue::Integer(shard.range.end as i64)),
+            Value::HashableValue(HashableValue::Integer(range.end as i64)),
             // Primary node
             Value::NonHashableValue(NonHashableValue::Array(vec![
+                // TODO fix this :'(
+                // Cannot borrow reactor data as it create temporaty value
+                // Value::HashableValue(HashableValue::Blob(reactor.ip.to_string().clone().as_bytes())),
                 Value::HashableValue(HashableValue::Blob("127.0.0.1".as_bytes())),
-                Value::HashableValue(HashableValue::Integer(shard.port as i64)),
-                Value::HashableValue(HashableValue::String(Cow::from(format!("{}", shard.id)))),
+                Value::HashableValue(HashableValue::Integer(reactor.port as i64)),
+                Value::HashableValue(HashableValue::String(Cow::from(format!("{}", range.start)))),
 
                 Value::NonHashableValue(NonHashableValue::Array(vec![
                     Value::HashableValue(HashableValue::String(Cow::from("hostname"))),
-                    Value::HashableValue(HashableValue::String(Cow::from("127.0.0.1"))),
+                    Value::HashableValue(HashableValue::String(Cow::from(reactor.ip.to_string()))),
                 ])),
             ])),
-        ]))
-    }).collect();
+        ]))}).collect();
+        return resp_ranges
+    }).flat_map(|ranges| { ranges }).collect();
 
     return Value::NonHashableValue(NonHashableValue::Array(slots)) ;
 }
@@ -45,7 +51,7 @@ impl RESPServer {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
             let storage_proxy = self.storage_proxy.clone();
-            let topology = self.topology.clone();
+            let cluster = self.cluster.clone();
             let reader = BufReader::new(stream);
             monoio::spawn(async move {
                 let mut handler = RESPHandler { stream: reader };
@@ -115,7 +121,7 @@ impl RESPServer {
                                     (HashableValue::String(Cow::from("cluster_my_epoch")), Value::HashableValue(HashableValue::Integer(1))),
                                     ])
                                 )),
-                                crate::redis::command::ClusterCmd::Slots() => topology_as_slots(&topology)
+                                crate::redis::command::ClusterCmd::Slots() => cluster_as_slots(&cluster)
                             }
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
