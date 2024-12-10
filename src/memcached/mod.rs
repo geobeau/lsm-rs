@@ -1,8 +1,8 @@
 use std::time::Duration;
 pub mod server;
 use monoio::{
-    io::{AsyncReadRent, AsyncWriteRentExt, AsyncReadRentExt, BufReader},
-    net::{TcpListener, TcpStream}, time::sleep,
+    io::{AsyncReadRent, AsyncWriteRentExt, BufReader},
+    time::sleep,
 };
 
 use crate::{
@@ -352,7 +352,7 @@ impl MemcachedBinaryHandler {
     async fn parse_get(&mut self, header: &Header) -> Option<Get> {
         assert_eq!(header.extra_size, 0u8);
 
-        let mut key_bytes = vec![0u8; header.key_size as usize];
+        let key_bytes = vec![0u8; header.key_size as usize];
         let (res, key_bytes) = self.stream.read(key_bytes).await;
         res.unwrap();
         let key = String::from_utf8(key_bytes.to_owned()).unwrap();
@@ -379,15 +379,15 @@ impl MemcachedBinaryHandler {
 
     pub async fn decode_command(&mut self) -> Result<Command, std::io::Error> {
         let mut header_buff = vec![0u8; 24];
-        let mut res: Result<usize, std::io::Error>;
+        let res: Result<usize, std::io::Error>;
         loop {
             (res, header_buff) = self.stream.read(header_buff).await;
             if res? == 0 {
                 panic!("huho");
                 sleep(Duration::from_micros(100)).await;
-                continue
+                continue;
             }
-            break
+            break;
         }
 
         let header = Header::from_be_bytes(header_buff);

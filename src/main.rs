@@ -1,8 +1,8 @@
-use lsm_rs::reactor::start_reactor;
 use lsm_rs::cluster::{self, ClusteredReactor, Reactor};
-use structopt::StructOpt;
+use lsm_rs::reactor::start_reactor;
 use std::net::Ipv4Addr;
 use std::thread;
+use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "lsm-rs", about = "lsm-rs is a (mostly) Redis compatible database")]
@@ -20,11 +20,9 @@ struct Opt {
     data_dir: std::path::PathBuf,
 }
 
-
-
 fn main() {
     let opt = Opt::from_args();
-    
+
     // let cpus = CpuSet::online().unwrap();
     let mut shard_threads = vec![];
     let mut reactors = Vec::with_capacity(opt.reactors_total as usize);
@@ -45,15 +43,12 @@ fn main() {
         let cluster = cluster.clone();
 
         let t = thread::spawn(move || {
-            start_reactor(ClusteredReactor {
-                reactor,
-                ranges,
-            }, cluster, reactor_id);
+            start_reactor(ClusteredReactor { reactor, ranges }, cluster, reactor_id);
         });
         shard_threads.push(t);
         reactor_id += 1
     }
-    
+
     for t in shard_threads {
         t.join();
     }

@@ -1,8 +1,7 @@
-use futures::{AsyncReadExt, AsyncWriteExt};
+use crate::record::{hash_sha1_bytes, Key, Record};
+use monoio::fs::File;
 use std::cell::{Cell, RefCell};
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
-use monoio::fs::File;
-use crate::record::{hash_sha1_bytes, Key, Record};
 
 use super::DiskPointer;
 use super::{memtable::MemTable, RecordMetadata};
@@ -28,15 +27,12 @@ pub struct DiskTable {
     status: Cell<DisktableStatus>,
 }
 
-
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum DisktableStatus {
     Active,
     PendingReclaimFlush,
     PendingDeletion,
 }
-
 
 #[derive(Debug)]
 pub struct DiskTableStats {
@@ -59,7 +55,10 @@ impl DiskTable {
         buf.extend(crate::time::now().to_le_bytes());
         memtable.values().iter().for_each(|r| {
             offsets.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: name.clone(), offset: buf.len() as u32 }),
+                data_ptr: super::RecordPtr::DiskTable(DiskPointer {
+                    disktable: name.clone(),
+                    offset: buf.len() as u32,
+                }),
                 key_size: r.key.string.len() as u16,
                 value_size: r.value.len() as u32,
                 timestamp: r.timestamp,
@@ -139,13 +138,16 @@ impl DiskTable {
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
             let mut key = vec![0u8; key_size as usize];
             stream_cursor += record_metadata_buffer.len() as u64;
-            
+
             (res, key) = self.fd.read_exact_at(key, stream_cursor).await;
             res.unwrap();
             stream_cursor += key_size as u64 + value_size as u64;
 
             meta.push(RecordMetadata {
-                data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: self.name.clone(), offset: cursor as u32 }),
+                data_ptr: super::RecordPtr::DiskTable(DiskPointer {
+                    disktable: self.name.clone(),
+                    offset: cursor as u32,
+                }),
                 key_size,
                 value_size,
                 hash: hash_sha1_bytes(&key),
@@ -162,7 +164,6 @@ impl DiskTable {
         let mut header_buffer = vec![0u8; 10];
         let mut record_metadata_buffer = vec![0u8; 14];
         let mut res;
-
 
         let mut stream_cursor = 0;
         (res, header_buffer) = self.fd.read_exact_at(header_buffer, stream_cursor).await;
@@ -181,7 +182,7 @@ impl DiskTable {
             let value_size = u32::from_le_bytes(record_metadata_buffer[2..6].try_into().expect("incorrect length"));
             let timestamp = u64::from_le_bytes(record_metadata_buffer[6..14].try_into().expect("incorrect length"));
             let mut key_bytes = vec![0u8; key_size as usize];
-            println!("read meta: k:{:?} v:{} t:{}", key_size, value_size,timestamp);
+            println!("read meta: k:{:?} v:{} t:{}", key_size, value_size, timestamp);
             println!("Cursor key: {} (reading {})", stream_cursor, key_size);
             stream_cursor += record_metadata_buffer.len() as u64;
 
@@ -196,7 +197,6 @@ impl DiskTable {
             res.unwrap();
             stream_cursor += value_size as u64;
 
-
             println!("Cursor end: {}", stream_cursor);
 
             let key = Key::new(std::str::from_utf8(&key_bytes).unwrap().to_string());
@@ -205,7 +205,10 @@ impl DiskTable {
             meta.push((
                 Record { timestamp, key, value },
                 RecordMetadata {
-                    data_ptr: super::RecordPtr::DiskTable(DiskPointer { disktable: self.name.clone(), offset: offset as u32 }),
+                    data_ptr: super::RecordPtr::DiskTable(DiskPointer {
+                        disktable: self.name.clone(),
+                        offset,
+                    }),
                     key_size,
                     value_size,
                     hash,
@@ -305,7 +308,7 @@ impl Manager {
             super::RecordPtr::DiskTable(ptr) => {
                 let disk = self.tables.borrow().get(&ptr.disktable).unwrap().clone();
                 disk.get(meta, ptr.offset).await
-            },
+            }
             _ => panic!("Trying to query disk with a non disk pointer"),
         }
     }
@@ -347,9 +350,11 @@ impl Manager {
     }
 
     pub fn references(&self) -> usize {
-        self.tables.borrow().values()
-        .filter(|d| d.status.get() == DisktableStatus::Active )
-        .fold(0, |size, t| size + t.get_stats().references)
+        self.tables
+            .borrow()
+            .values()
+            .filter(|d| d.status.get() == DisktableStatus::Active)
+            .fold(0, |size, t| size + t.get_stats().references)
     }
 
     pub fn len(&self) -> usize {

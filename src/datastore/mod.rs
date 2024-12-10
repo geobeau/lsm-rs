@@ -38,7 +38,7 @@ pub enum RecordPtr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiskPointer {
     disktable: Rc<String>,
-    offset: u32
+    offset: u32,
 }
 
 // Not using composition here to have small structure
@@ -54,7 +54,7 @@ impl HybridPointer {
     pub fn to_memtable_pointer(&self) -> MemtablePointer {
         MemtablePointer {
             memtable: self.memtable,
-            offset: self.m_offset
+            offset: self.m_offset,
         }
     }
 }
@@ -62,7 +62,7 @@ impl HybridPointer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemtablePointer {
     memtable: u16,
-    offset: u16
+    offset: u16,
 }
 
 pub struct DataStore {
@@ -173,12 +173,10 @@ impl DataStore {
         let timestamp = r.timestamp;
 
         let ptr = match self.index.get(hash) {
-            Some(m) => {
-                match m.data_ptr {
-                    RecordPtr::DiskTable(_) => self.memtable_manager.append(r),
-                    RecordPtr::Compacting(_) => self.memtable_manager.append(r),
-                    RecordPtr::MemTable(ptr) => self.memtable_manager.try_emplace(ptr, r),
-                }
+            Some(m) => match m.data_ptr {
+                RecordPtr::DiskTable(_) => self.memtable_manager.append(r),
+                RecordPtr::Compacting(_) => self.memtable_manager.append(r),
+                RecordPtr::MemTable(ptr) => self.memtable_manager.try_emplace(ptr, r),
             },
             None => self.memtable_manager.append(r),
         };
@@ -261,7 +259,7 @@ impl DataStore {
     fn remove_reference_from_storage(&self, meta: &RecordMetadata) {
         match &meta.data_ptr {
             RecordPtr::DiskTable(ptr) => self.table_manager.remove_reference_from_storage(&ptr.disktable),
-            RecordPtr::MemTable(ptr) => self.memtable_manager.remove_reference_from_memtable(&ptr),
+            RecordPtr::MemTable(ptr) => self.memtable_manager.remove_reference_from_memtable(ptr),
             RecordPtr::Compacting(ptr) => {
                 self.table_manager.remove_reference_from_storage(&ptr.disktable);
                 self.memtable_manager.remove_reference_from_memtable(&ptr.to_memtable_pointer());
@@ -291,7 +289,12 @@ impl DataStore {
                 }
                 let memtable_ptr = self.memtable_manager.append(record);
                 if let RecordPtr::DiskTable(ptr) = meta.data_ptr {
-                    meta.data_ptr = RecordPtr::Compacting(HybridPointer { disktable: ptr.disktable, d_offset: ptr.offset, memtable: memtable_ptr.memtable, m_offset: memtable_ptr.offset })
+                    meta.data_ptr = RecordPtr::Compacting(HybridPointer {
+                        disktable: ptr.disktable,
+                        d_offset: ptr.offset,
+                        memtable: memtable_ptr.memtable,
+                        m_offset: memtable_ptr.offset,
+                    })
                 }
                 self.index.update(meta)
             })
@@ -341,9 +344,7 @@ mod tests {
 
     #[test]
     fn test_datastore_for_consistency() {
-        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
-        .build()
-        .unwrap();
+        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new().build().unwrap();
 
         rt.block_on(async {
             let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_consistency")).await;
@@ -439,9 +440,7 @@ mod tests {
 
     #[test]
     fn test_datastore_for_flush_and_compactions() {
-        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new()
-        .build()
-        .unwrap();
+        let mut rt = monoio::RuntimeBuilder::<monoio::IoUringDriver>::new().build().unwrap();
 
         rt.block_on(async {
             let mut storage = DataStore::new(PathBuf::from(r"./data/test/test_datastore_for_flush_and_compactions")).await;
@@ -500,7 +499,7 @@ mod tests {
             assert_eq!(storage.table_manager.get_disktables_marked_for_deletion().len(), 1);
             storage.table_manager.delete_disktables_marked_for_deletion();
             storage.get_stats().assert_not_corrupted();
-        
+
             storage.reclaim_all_disktables().await;
             storage.get_stats().assert_not_corrupted();
             storage.force_flush().await;

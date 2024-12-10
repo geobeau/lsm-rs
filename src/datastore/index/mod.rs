@@ -13,6 +13,12 @@ pub struct Index {
     kvs: RefCell<HashMap<HashedKey, RecordMetadata>>,
 }
 
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Index {
     pub fn new() -> Index {
         Index {
