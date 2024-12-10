@@ -1,6 +1,4 @@
-use monoio::{net::TcpListener, io::BufReader};
-use monoio_compat::TcpStreamCompat;
-use tokio::net::TcpStream;
+use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
     memcached::{MemcachedBinaryHandler, Response},
@@ -32,13 +30,11 @@ impl MemcachedBinaryServer {
                     // }
                     let memcached_command = match handler.decode_command().await {
                         Ok(c) => c,
-                        Err(err) => {
-                            match err.kind() {
-                                std::io::ErrorKind::ConnectionReset => break,
-                                _ => {
-                                    println!("Error on conn: {}", err);
-                                    break
-                                    },
+                        Err(err) => match err.kind() {
+                            std::io::ErrorKind::ConnectionReset => break,
+                            _ => {
+                                println!("Error on conn: {}", err);
+                                break;
                             }
                         },
                     };

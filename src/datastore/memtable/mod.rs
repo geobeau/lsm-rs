@@ -1,6 +1,10 @@
-use std::{cell::{RefCell, Cell}, borrow::BorrowMut, rc::Rc};
+use std::{
+    borrow::BorrowMut,
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
-use crate::{record::{Record}};
+use crate::record::Record;
 
 use super::MemtablePointer;
 
@@ -8,9 +12,8 @@ pub struct MemTable {
     pub id: u16,
     buffer: RefCell<Vec<Record>>,
     stats: RefCell<Stats>,
-    status: Cell<MemtableStatus>
+    status: Cell<MemtableStatus>,
 }
-
 
 #[derive(Debug, Copy, Clone)]
 pub enum MemtableStatus {
@@ -32,7 +35,7 @@ impl MemTable {
             id,
             buffer: RefCell::from(Vec::with_capacity(usize::pow(2, 16))),
             stats: RefCell::from(Stats { references: 0, bytes: 0 }),
-            status: Cell::from(MemtableStatus::Open)
+            status: Cell::from(MemtableStatus::Open),
         }
     }
 
@@ -54,7 +57,7 @@ impl MemTable {
         mutable_buffer.push(record);
         mutable_stats.references += 1;
         mutable_stats.bytes += size;
-        return offset as u16
+        offset as u16
     }
 
     pub fn get(&self, ptr: &MemtablePointer) -> Record {
@@ -115,18 +118,17 @@ impl MemTable {
     }
 }
 
-
 pub struct Manager {
     tables: RefCell<MemtableList>,
     memtable_max_size_bytes: usize,
-    cur_memtable: Cell<u16>
+    cur_memtable: Cell<u16>,
 }
 
 impl Manager {
     pub fn new(memtable_max_size_bytes: usize) -> Manager {
         let mut tables = MemtableList::new();
         let id = tables.get_next_free();
-        
+
         Manager {
             tables: RefCell::from(tables),
             cur_memtable: Cell::from(id),
@@ -142,7 +144,7 @@ impl Manager {
             let memtable = tables.get(ptr.memtable);
             if memtable.is_unflushed() {
                 memtable.emplace(&ptr, record);
-                return ptr
+                return ptr;
             }
         }
         self.append(record)
@@ -151,8 +153,7 @@ impl Manager {
     pub fn append(&self, record: Record) -> MemtablePointer {
         let mut tables = self.tables.borrow_mut();
         let mut memtable = tables.get(self.cur_memtable.get());
-        if (memtable.get_byte_size() + record.size_of() > self.memtable_max_size_bytes)
-            || (memtable.len() >= (u16::MAX as usize - 1)) {
+        if (memtable.get_byte_size() + record.size_of() > self.memtable_max_size_bytes) || (memtable.len() >= (u16::MAX as usize - 1)) {
             println!("Marking as flushable: {}, {}", memtable.get_byte_size(), memtable.id);
             memtable.status.set(MemtableStatus::Flushable);
             let id = tables.get_next_free();
@@ -161,7 +162,10 @@ impl Manager {
         }
         let offset = memtable.borrow_mut().append(record);
 
-        return MemtablePointer{memtable: self.cur_memtable.get(), offset: offset as u16}
+        MemtablePointer {
+            memtable: self.cur_memtable.get(),
+            offset,
+        }
     }
 
     pub fn get(&self, ptr: &MemtablePointer) -> Record {
@@ -193,19 +197,25 @@ impl Manager {
     }
 
     pub fn len(&self) -> usize {
-        self.tables.borrow().iter()
-        .filter(|e| e.next_free.is_none())
-        .fold(0, |total, entry| total + entry.table.len())
+        self.tables
+            .borrow()
+            .iter()
+            .filter(|e| e.next_free.is_none())
+            .fold(0, |total, entry| total + entry.table.len())
     }
 
     pub fn references(&self) -> usize {
-        self.tables.borrow().iter()
-        .filter(|e| e.next_free.is_none())
-        .fold(0, |total, entry| total + entry.table.references())
+        self.tables
+            .borrow()
+            .iter()
+            .filter(|e| e.next_free.is_none())
+            .fold(0, |total, entry| total + entry.table.references())
     }
 
     pub fn get_all_unflushed_memtables(&self) -> Vec<Rc<MemTable>> {
-        self.tables.borrow_mut().iter()
+        self.tables
+            .borrow_mut()
+            .iter()
             .filter(|e| e.next_free.is_none())
             .map(|e| e.table.clone())
             .filter(|t| t.is_unflushed())
@@ -213,7 +223,9 @@ impl Manager {
     }
 
     pub fn get_all_flushable_memtables(&self) -> Vec<Rc<MemTable>> {
-        self.tables.borrow_mut().iter()
+        self.tables
+            .borrow_mut()
+            .iter()
             .filter(|e| e.next_free.is_none())
             .map(|e| e.table.clone())
             .filter(|t| t.should_be_flushed())
@@ -221,12 +233,10 @@ impl Manager {
     }
 }
 
-
 pub struct Entry {
-    next_free: Option<u16>, 
-    table: Rc<MemTable> 
+    next_free: Option<u16>,
+    table: Rc<MemTable>,
 }
-
 
 struct MemtableList {
     list: Vec<Entry>,
@@ -245,7 +255,7 @@ impl MemtableList {
         if self.list[offset as usize].next_free.is_some() {
             panic!("trying to reach truncated memtable")
         }
-        return &self.list[offset as usize].table
+        &self.list[offset as usize].table
     }
 
     pub fn get_next_free(&mut self) -> u16 {
@@ -254,7 +264,10 @@ impl MemtableList {
             if self.list.len() > u16::MAX as usize {
                 panic!("Too much data: {} (max={})", self.list.len(), u16::MAX)
             }
-            self.list.push(Entry{table: Rc::from(MemTable::new(offset as u16)), next_free: None });
+            self.list.push(Entry {
+                table: Rc::from(MemTable::new(offset as u16)),
+                next_free: None,
+            });
             self.last_free = self.list.len();
             return offset as u16;
         }
@@ -264,11 +277,11 @@ impl MemtableList {
                 let offset = self.last_free;
                 self.last_free = *p as usize;
                 offset
-            },
+            }
             None => panic!("offset: {} should be free but contains data", self.last_free),
         };
-        self.list[offset].next_free = None; 
-        return offset as u16;
+        self.list[offset].next_free = None;
+        offset as u16
     }
 
     pub fn delete(&mut self, offset: u16) {
@@ -283,12 +296,12 @@ impl MemtableList {
         self.last_free = self.list.len();
         for i in 0..self.list.len() {
             self.list[i].table.truncate();
-            self.list[i].next_free= Some(self.last_free as u16);
+            self.list[i].next_free = Some(self.last_free as u16);
             self.last_free = i;
         }
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, Entry>{
+    pub fn iter(&self) -> std::slice::Iter<'_, Entry> {
         self.list.iter()
     }
 }

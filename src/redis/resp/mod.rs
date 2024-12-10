@@ -1,12 +1,9 @@
-use core::{hash, str};
-use monoio::{io::{AsyncBufRead, AsyncWriteRentExt, BufReader}, time};
+use core::{str};
 
 #[macro_use]
 mod macros;
 
 use std::{borrow::Cow, cmp::Ordering, collections::HashMap};
-
-
 
 const SEPARATOR: &[u8] = "\r\n".as_bytes();
 
@@ -14,28 +11,28 @@ pub fn redis_hashable_value_to_bytes(value: &HashableValue, buffer: &mut Vec<u8>
     match value {
         HashableValue::Blob(blob) => {
             buffer.push(b'$');
-            buffer.extend_from_slice(blob.len().to_string().as_str().as_bytes());
+            buffer.extend_from_slice(blob.len().to_string().as_bytes());
             buffer.extend_from_slice(SEPARATOR);
             buffer.extend_from_slice(blob);
             buffer.extend_from_slice(SEPARATOR);
-        },
+        }
         HashableValue::String(cow) => {
             buffer.push(b'+');
             buffer.extend_from_slice(cow.as_bytes());
             buffer.extend_from_slice(SEPARATOR);
-        },
+        }
         HashableValue::Error(prefix, msg) => {
             buffer.push(b'-');
             buffer.extend_from_slice(prefix.as_bytes());
             buffer.push(b'-');
             buffer.extend_from_slice(msg.as_bytes());
             buffer.extend_from_slice(SEPARATOR);
-        },
+        }
         HashableValue::Integer(i) => {
             buffer.push(b':');
             buffer.extend_from_slice(format!("{i}").as_bytes());
             buffer.extend_from_slice(SEPARATOR);
-        },
+        }
         HashableValue::Boolean(_) => todo!(),
         HashableValue::BigInteger(_) => todo!(),
     }
@@ -46,25 +43,24 @@ pub fn redis_non_hashable_value_to_bytes(value: &NonHashableValue, buffer: &mut 
         NonHashableValue::Array(vec) => {
             buffer.push(b'*');
             // TODO: hopefully this doesn't create an actual string
-            buffer.extend_from_slice(vec.len().to_string().as_str().as_bytes());
+            buffer.extend_from_slice(vec.len().to_string().as_bytes());
             buffer.extend_from_slice(SEPARATOR);
             vec.iter().for_each(|val| redis_value_to_bytes(val, buffer));
             // buffer.extend_from_slice(SEPARATOR);
-        },
+        }
         NonHashableValue::Float(_) => todo!(),
         NonHashableValue::Map(map) => {
             buffer.push(b'%');
             // TODO: hopefully this doesn't create an actual string
-            buffer.extend_from_slice(map.len().to_string().as_str().as_bytes());
+            buffer.extend_from_slice(map.len().to_string().as_bytes());
             buffer.extend_from_slice(SEPARATOR);
             map.iter().for_each(|(key, val)| {
                 redis_hashable_value_to_bytes(key, buffer);
                 redis_value_to_bytes(val, buffer);
             });
-        },
+        }
     }
 }
-
 
 pub fn redis_value_to_bytes(value: &Value, buffer: &mut Vec<u8>) {
     match value {
@@ -73,11 +69,9 @@ pub fn redis_value_to_bytes(value: &Value, buffer: &mut Vec<u8>) {
         Value::Null => {
             buffer.push(b'_');
             buffer.extend_from_slice(SEPARATOR);
-        },
+        }
     }
 }
-
-
 
 /// Redis Value.
 #[derive(Debug, Clone)]
@@ -118,7 +112,6 @@ pub enum NonHashableValue<'a> {
     Map(HashMap<HashableValue<'a>, Value<'a>>),
 }
 
-
 /// Redis Value.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum HashableValue<'a> {
@@ -135,8 +128,6 @@ pub enum HashableValue<'a> {
     /// Boolean
     Boolean(bool),
 }
-
-
 
 /// Protocol errors
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -159,7 +150,6 @@ pub enum Error {
     NewLine,
 }
 
-
 /// Parses redis values from an stream of bytes. If the data is incomplete
 /// Err(Error::Partial) is returned.
 ///
@@ -180,7 +170,6 @@ pub fn parse(bytes: &[u8]) -> Result<(&[u8], Value), Error> {
     };
     var_name
 }
-
 
 fn parse_error(bytes: &[u8]) -> Result<(&[u8], Value), Error> {
     let (bytes, err_type) = read_until!(bytes, b' ');
@@ -262,7 +251,7 @@ fn parse_map(bytes: &[u8]) -> Result<(&[u8], Value), Error> {
             Value::Null => todo!(),
         };
     }
-    return Ok((bytes, Value::NonHashableValue(NonHashableValue::Map(v))))
+    return Ok((bytes, Value::NonHashableValue(NonHashableValue::Map(v))));
 }
 
 fn parse_array(bytes: &[u8]) -> Result<(&[u8], Value), Error> {

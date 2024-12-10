@@ -2,8 +2,13 @@ use std::{rc::Rc, time::Duration};
 
 use monoio::{join, time::sleep};
 
-use crate::{cluster::{Cluster, ClusteredReactor}, datastore::DataStore, memcached::server::MemcachedBinaryServer, redis::server::RESPServer, storageproxy::StorageProxy};
-
+use crate::{
+    cluster::{Cluster, ClusteredReactor},
+    datastore::DataStore,
+    memcached::server::MemcachedBinaryServer,
+    redis::server::RESPServer,
+    storageproxy::StorageProxy,
+};
 
 pub fn start_compaction_manager(ds: Rc<DataStore>) {
     monoio::spawn(async move {
@@ -35,7 +40,6 @@ pub fn start_stat_manager(ds: Rc<DataStore>, shard: u8) {
     });
 }
 
-
 pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reactor_id: u8) {
     println!("Start reactor {reactor_id}");
 
@@ -55,13 +59,13 @@ pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reac
         println!("Starting executor {}", id);
         let ds = Rc::from(DataStore::new("./data/".into()).await);
         println!("datastore inited");
-        let storage_proxy: StorageProxy;
+        
         start_compaction_manager(ds.clone());
         start_flush_manager(ds.clone());
         start_stat_manager(ds.clone(), reactor_id);
 
         println!("Single core mode");
-        storage_proxy = StorageProxy {
+        let storage_proxy: StorageProxy = StorageProxy {
             datastore: ds,
             cur_shard: 0,
             nr_shards: 1,
@@ -69,14 +73,14 @@ pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reac
         let resp = RESPServer {
             host_port: format!("127.0.0.1:{}", clustered_reactor.reactor.port),
             storage_proxy: storage_proxy.clone(),
-            cluster: cluster,
+            cluster,
         };
         let memcached_port = 11211 + reactor_id as u64;
         let memcached = MemcachedBinaryServer {
             host_port: format!("127.0.0.1:{}", memcached_port),
             storage_proxy: storage_proxy.clone(),
         };
-        
+
         join!(resp.listen(), memcached.listen());
         println!("Terminated");
     });
