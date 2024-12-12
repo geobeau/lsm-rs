@@ -1,4 +1,4 @@
-use std::{rc::Rc, time::Duration};
+use std::{path::PathBuf, rc::Rc, time::Duration};
 
 use monoio::{join, time::sleep};
 
@@ -40,7 +40,7 @@ pub fn start_stat_manager(ds: Rc<DataStore>, shard: u8) {
     });
 }
 
-pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reactor_id: u8) {
+pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reactor_id: u8, data_dir: &PathBuf) {
     println!("Start reactor {reactor_id}");
 
     let urb = io_uring::IoUring::builder();
@@ -63,13 +63,8 @@ pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reac
         start_compaction_manager(ds.clone());
         start_flush_manager(ds.clone());
         start_stat_manager(ds.clone(), reactor_id);
+        let storage_proxy = StorageProxy::new(&clustered_reactor, &cluster, data_dir).await;
 
-        println!("Single core mode");
-        let storage_proxy: StorageProxy = StorageProxy {
-            datastore: ds,
-            cur_shard: 0,
-            nr_shards: 1,
-        };
         let resp = RESPServer {
             host_port: format!("127.0.0.1:{}", clustered_reactor.reactor.port),
             storage_proxy: storage_proxy.clone(),

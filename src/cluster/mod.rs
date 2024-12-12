@@ -1,6 +1,6 @@
-use std::{collections::HashMap, hash::Hash, net::IpAddr};
+use std::{char::MAX, collections::HashMap, hash::Hash, net::IpAddr};
 
-const MAX_RANGE: u16 = 2u16.pow(14);
+pub const MAX_RANGE: u16 = 2u16.pow(14);
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Range {
@@ -65,6 +65,14 @@ impl Cluster {
     }
 }
 
+/// Align `shard` with the start of the range (range are determined by the number of shards)
+pub fn compute_range_start(shard: u16, total_shards: u16) -> u16 {
+    let multiple = MAX_RANGE / total_shards;
+    return ((shard + multiple - 1) / multiple) * multiple - multiple;
+}
+
+
+
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
@@ -90,3 +98,5 @@ impl Cluster {
 //         assert_eq!(topo.shards[&61].range, Range{start: 16120, end: MAX_RANGE});
 //     }
 // }
+
+

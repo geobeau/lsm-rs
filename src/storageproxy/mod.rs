@@ -1,17 +1,14 @@
-use std::rc::Rc;
+use core::panic;
+use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp},
-    datastore::DataStore,
-    record::HashedKey,
+    api::{Command, DeleteResp, GetResp, Response, SetResp}, cluster::{self, Cluster, ClusteredReactor}, datastore::DataStore, reactor, record::HashedKey
 };
 
 #[derive(Clone)]
 pub struct StorageProxy {
-    pub datastore: Rc<DataStore>,
-    // pub sender: Option<Rc<Senders<CommandHandle>>>,
-    pub cur_shard: usize,
-    pub nr_shards: usize,
+    pub shards: HashMap<u16, Rc<DataStore>>,
+    pub shard_count: u16,
 }
 
 #[derive(Debug)]
@@ -21,22 +18,33 @@ pub struct CommandHandle {
 }
 
 impl StorageProxy {
-    fn get_shard_from_hash(&self, hash: &HashedKey) -> usize {
-        hash[0] as usize % self.nr_shards
+    pub async fn new(clustered_reactor: &ClusteredReactor, cluster: &Cluster, data_dir: &PathBuf) -> StorageProxy {
+        let mut proxy = StorageProxy {
+            shards: HashMap::new(),
+            shard_count: cluster.shard_count,
+        };
+
+        for range in &clustered_reactor.ranges {
+            let mut shard_path = PathBuf::new();
+            shard_path.push(format!("{}", range.start));
+            proxy.add_shard(range.start, data_dir.join(shard_path)).await
+        }
+
+        return proxy
     }
 
-    pub async fn dispatch_local(&self, cmd: Command) -> Response {
+    pub async fn dispatch_local(&self, datastore: Rc<DataStore>, cmd: Command) -> Response {
         match cmd {
             Command::Get(c) => {
-                let record = self.datastore.get(&c.key).await;
+                let record = datastore.get(&c.key).await;
                 Response::Get(GetResp { record })
             }
             Command::Delete(c) => {
-                self.datastore.delete(&c.key);
+                datastore.delete(&c.key);
                 Response::Delete(DeleteResp {})
             }
             Command::Set(c) => {
-                self.datastore.set(c.record);
+                datastore.set(c.record);
                 Response::Set(SetResp {})
             }
         }
@@ -60,13 +68,20 @@ impl StorageProxy {
     // }
 
     pub async fn dispatch(&self, cmd: Command) -> Response {
-        let shard_id = self.get_shard_from_hash(cmd.get_hash());
-        if self.cur_shard == shard_id {
-            self.dispatch_local(cmd).await
-        } else {
-            panic!("Dispatch disabled")
-            // self.dispatch_remote(cmd, shard_id).await
+        let cmd_shard = cmd.get_shard();
+        let range_start = cluster::compute_range_start(cmd_shard, self.shard_count);
+        // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
+        match self.shards.get(&range_start) {
+            Some(ds) => self.dispatch_local(ds.clone(), cmd).await,
+            None => {
+                println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", range_start, cmd_shard, cmd);
+                todo!(); // TODO: return a moved information
+            }
         }
+    }
+
+    pub async fn add_shard(&mut self, range_start: u16, directory: PathBuf) {
+        self.shards.insert(range_start, Rc::from(DataStore::new(directory).await));
     }
 
     // pub async fn spawn_remote_dispatch_handlers(&self, mut receiver: Receivers<CommandHandle>) {
