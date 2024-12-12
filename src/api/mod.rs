@@ -1,4 +1,7 @@
-use crate::{cluster, record::{HashedKey, Key, Record}};
+use crate::{
+    cluster,
+    record::{HashedKey, Key, Record},
+};
 
 #[derive(Debug)]
 pub enum Command {
@@ -16,10 +19,9 @@ impl Command {
         }
     }
 
-
     /// get the shard number between 0 and 16384 (`cluster::MAX_RANGE`) using crc16
     pub fn get_shard(&self) -> u16 {
-        return self.get_crc16() % cluster::MAX_RANGE
+        self.get_crc16() % cluster::MAX_RANGE
     }
 
     // TODO: maybe pre-calculate it?
@@ -29,7 +31,7 @@ impl Command {
             Command::Delete(c) => &c.key.string,
             Command::Set(c) => &c.record.key.string,
         };
-        return crc16::State::<crc16::ARC>::calculate(key.as_bytes())
+        return crc16::State::<crc16::ARC>::calculate(key.as_bytes());
     }
 }
 

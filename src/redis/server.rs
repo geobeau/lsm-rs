@@ -4,7 +4,8 @@ use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
     api,
-    cluster::{Cluster}, record,
+    cluster::Cluster,
+    record,
     redis::{
         command::{ClientCmd, Command, RESPHandler},
         resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value},
@@ -83,28 +84,32 @@ impl RESPServer {
                     let resp = match redis_command {
                         Command::Hello(hello_cmd) => {
                             if hello_cmd.version != '3' {
-                                Cow::from("NOPROTO");Cow::from("sorry, this protocol version is not supported.");
+                                Value::HashableValue(HashableValue::Error(
+                                    Cow::from("NOPROTO"),
+                                    Cow::from("sorry, this protocol version is not supported."),
+                                ))
+                            } else {
+                                Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
+                                    (
+                                        HashableValue::String(Cow::from("server")),
+                                        Value::HashableValue(HashableValue::String(Cow::from("redis"))),
+                                    ),
+                                    (
+                                        HashableValue::String(Cow::from("version")),
+                                        Value::HashableValue(HashableValue::String(Cow::from("0"))),
+                                    ),
+                                    (HashableValue::String(Cow::from("proto")), Value::HashableValue(HashableValue::Integer(3))),
+                                    (HashableValue::String(Cow::from("id")), Value::HashableValue(HashableValue::Integer(0))),
+                                    (
+                                        HashableValue::String(Cow::from("mode")),
+                                        Value::HashableValue(HashableValue::String(Cow::from("cluster"))),
+                                    ),
+                                    (HashableValue::String(Cow::from("modules")), Value::Null),
+                                ])))
                             }
-                            Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
-                                (
-                                    HashableValue::String(Cow::from("server")),
-                                    Value::HashableValue(HashableValue::String(Cow::from("redis"))),
-                                ),
-                                (
-                                    HashableValue::String(Cow::from("version")),
-                                    Value::HashableValue(HashableValue::String(Cow::from("0"))),
-                                ),
-                                (HashableValue::String(Cow::from("proto")), Value::HashableValue(HashableValue::Integer(3))),
-                                (HashableValue::String(Cow::from("id")), Value::HashableValue(HashableValue::Integer(0))),
-                                (
-                                    HashableValue::String(Cow::from("mode")),
-                                    Value::HashableValue(HashableValue::String(Cow::from("cluster"))),
-                                ),
-                                (HashableValue::String(Cow::from("modules")), Value::Null),
-                            ])))
                         }
                         Command::Client(client_cmd) => match client_cmd {
-                            ClientCmd::SetInfo(set_info_cmd) => Value::HashableValue(HashableValue::String(Cow::from("OK"))),
+                            ClientCmd::SetInfo(_) => Value::HashableValue(HashableValue::String(Cow::from("OK"))),
                         },
                         Command::Set(set_cmd) => {
                             // TODO: should return result

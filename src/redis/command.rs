@@ -60,7 +60,7 @@ fn parse_client_command(args: &[Value]) -> Command {
 
 const CMD_SETINFO: &str = "SETINFO";
 fn parse_setinfo_cmd(args: &[Value]) -> SetInfoCmd {
-    let field = args[2].try_as_str().unwrap();
+    let _ = args[2].try_as_str().unwrap();
     let value = args[3].try_as_str().unwrap();
 
     SetInfoCmd {
@@ -135,7 +135,7 @@ fn parse_cluster_command(args: &[Value]) -> Command {
 }
 
 const CMD_COMMAND: &str = "COMMAND";
-fn parse_command_command(args: &[Value]) -> Command {
+fn parse_command_command(_: &[Value]) -> Command {
     Command::Command()
 }
 

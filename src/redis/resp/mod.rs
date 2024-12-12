@@ -1,4 +1,4 @@
-use core::{str};
+use core::str;
 
 #[macro_use]
 mod macros;
@@ -89,13 +89,13 @@ impl<'a> Value<'a> {
         match self {
             Value::HashableValue(hashable_value) => match hashable_value {
                 HashableValue::Blob(blob) => Some(str::from_utf8(blob).unwrap()),
-                HashableValue::String(cow) => todo!(),
-                HashableValue::Error(cow, cow1) => todo!(),
+                HashableValue::String(_) => todo!(),
+                HashableValue::Error(_, _) => todo!(),
                 HashableValue::Integer(_) => todo!(),
                 HashableValue::BigInteger(_) => todo!(),
                 HashableValue::Boolean(_) => todo!(),
             },
-            Value::NonHashableValue(non_hashable_value) => todo!(),
+            Value::NonHashableValue(_) => todo!(),
             Value::Null => todo!(),
         }
     }

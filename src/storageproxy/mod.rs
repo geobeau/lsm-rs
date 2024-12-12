@@ -1,8 +1,9 @@
-use core::panic;
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp}, cluster::{self, Cluster, ClusteredReactor}, datastore::DataStore, reactor, record::HashedKey
+    api::{Command, DeleteResp, GetResp, Response, SetResp},
+    cluster::{self, Cluster, ClusteredReactor},
+    datastore::DataStore,
 };
 
 #[derive(Clone)]
@@ -30,7 +31,7 @@ impl StorageProxy {
             proxy.add_shard(slot.start, data_dir.join(shard_path)).await
         }
 
-        return proxy
+        proxy
     }
 
     pub async fn dispatch_local(&self, datastore: Rc<DataStore>, cmd: Command) -> Response {

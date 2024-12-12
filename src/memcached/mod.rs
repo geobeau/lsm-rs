@@ -1,9 +1,5 @@
-use std::time::Duration;
 pub mod server;
-use monoio::{
-    io::{AsyncReadRent, AsyncWriteRentExt, BufReader},
-    time::sleep,
-};
+use monoio::io::{AsyncReadRent, AsyncWriteRentExt, BufReader};
 
 use crate::{
     api::{self},
@@ -384,8 +380,8 @@ impl MemcachedBinaryHandler {
             (res, header_buff) = self.stream.read(header_buff).await;
             if res? == 0 {
                 panic!("huho");
-                sleep(Duration::from_micros(100)).await;
-                continue;
+                // sleep(Duration::from_micros(100)).await;
+                // continue;
             }
             break;
         }

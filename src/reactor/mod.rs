@@ -59,7 +59,7 @@ pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reac
         println!("Starting executor {}", id);
         let ds = Rc::from(DataStore::new("./data/".into()).await);
         println!("datastore inited");
-        
+
         start_compaction_manager(ds.clone());
         start_flush_manager(ds.clone());
         start_stat_manager(ds.clone(), reactor_id);

@@ -52,6 +52,6 @@ fn main() {
     }
 
     for t in shard_threads {
-        t.join();
+        t.join().unwrap();
     }
 }

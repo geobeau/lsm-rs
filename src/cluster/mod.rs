@@ -33,11 +33,11 @@ impl Cluster {
         // Ensure 16k is divisible by shards_count
         assert_eq!(MAX_RANGE % shards_count, 0);
 
-        let mut ranges = Vec::with_capacity(shards_count as usize);
+        let mut slots = Vec::with_capacity(shards_count as usize);
         let range = MAX_RANGE / shards_count;
 
-        for i in 0..shards_count {
-            ranges.push(Slot {
+        for _ in 0..shards_count {
+            slots.push(Slot {
                 start: offset,
                 end: offset + range,
             });
@@ -51,10 +51,10 @@ impl Cluster {
             reactor_allocations.insert(reactor.clone(), Vec::new());
         }
 
-        for range in ranges {
+        for slot in slots {
             let reactor = &reactors[offset % reactors.len()];
-            let nodeRanges = reactor_allocations.get_mut(reactor).unwrap();
-            nodeRanges.push(range);
+            let node_slots = reactor_allocations.get_mut(reactor).unwrap();
+            node_slots.push(slot);
         }
 
         Cluster {
@@ -67,10 +67,8 @@ impl Cluster {
 /// Align `shard` with the proper slot (slot are determined by the number of shards)
 pub fn compute_shard_id(shard: u16, total_shards: u16) -> u16 {
     let multiple = MAX_RANGE / total_shards;
-    return ((shard + multiple - 1) / multiple) * multiple - multiple;
+    ((shard + multiple - 1) / multiple) * multiple - multiple
 }
-
-
 
 // #[cfg(test)]
 // mod tests {
@@ -97,5 +95,3 @@ pub fn compute_shard_id(shard: u16, total_shards: u16) -> u16 {
 //         assert_eq!(topo.shards[&61].range, Range{start: 16120, end: MAX_RANGE});
 //     }
 // }
-
-

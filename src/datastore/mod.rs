@@ -300,9 +300,7 @@ impl DataStore {
             })
             .collect();
 
-        let mut updated = 0;
         for meta in meta_to_update {
-            updated += 1;
             self.remove_reference_from_storage(&meta);
         }
         t.set_as_pending_flush();
