@@ -14,7 +14,7 @@ use super::resp::{HashableValue, Value};
 pub enum Command {
     Hello(HelloCmd),
     Client(ClientCmd),
-    Cluster(ClusterCmd),
+    Topology(TopologyCmd),
     Command(),
     Set(SetCmd),
     Get(GetCmd),
@@ -115,7 +115,7 @@ fn parse_get_command(args: &[Value]) -> Command {
 }
 
 #[derive(Debug, Clone)]
-pub enum ClusterCmd {
+pub enum TopologyCmd {
     Slots(),
     Info(),
     // SetInfo(SetInfoCmd)
@@ -128,8 +128,8 @@ const CMD_CLUSTER: &str = "CLUSTER";
 fn parse_cluster_command(args: &[Value]) -> Command {
     let sub_command = args[1].try_as_str().unwrap();
     match sub_command {
-        CMD_CLUSTER_SLOT => Command::Cluster(ClusterCmd::Slots()),
-        CMD_CLUSTER_INFO => Command::Cluster(ClusterCmd::Info()),
+        CMD_CLUSTER_SLOT => Command::Topology(TopologyCmd::Slots()),
+        CMD_CLUSTER_INFO => Command::Topology(TopologyCmd::Info()),
         _ => todo!(),
     }
 }

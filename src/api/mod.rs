@@ -1,5 +1,5 @@
 use crate::{
-    cluster,
+    topology,
     record::{HashedKey, Key, Record},
 };
 
@@ -21,7 +21,7 @@ impl Command {
 
     /// get the shard number between 0 and 16384 (`cluster::MAX_RANGE`) using crc16
     pub fn get_shard(&self) -> u16 {
-        self.get_crc16() % cluster::MAX_RANGE
+        self.get_crc16() % topology::MAX_RANGE
     }
 
     // TODO: maybe pre-calculate it?

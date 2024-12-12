@@ -1,5 +1,5 @@
 pub mod api;
-pub mod cluster;
+pub mod topology;
 pub mod datastore;
 pub mod memcached;
 pub mod reactor;

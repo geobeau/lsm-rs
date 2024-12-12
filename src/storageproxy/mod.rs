@@ -6,7 +6,7 @@ use shard::Shard;
 
 use crate::{
     api::{Command, DeleteResp, GetResp, Response, SetResp},
-    cluster::{self, Cluster, ClusteredReactor},
+    topology::{self, Topology, LocalTopology},
     datastore::DataStore,
 };
 
@@ -24,7 +24,7 @@ pub struct CommandHandle {
 }
 
 impl StorageProxy {
-    pub async fn new(reactor_id: u8, clustered_reactor: &ClusteredReactor, cluster: &Cluster, data_dir: &PathBuf) -> StorageProxy {
+    pub async fn new(reactor_id: u8, clustered_reactor: &LocalTopology, cluster: &Topology, data_dir: &PathBuf) -> StorageProxy {
         let mut proxy = StorageProxy {
             reactor_id: reactor_id,
             shards: HashMap::new(),
@@ -76,7 +76,7 @@ impl StorageProxy {
 
     pub async fn dispatch(&self, cmd: Command) -> Response {
         let cmd_shard = cmd.get_shard();
-        let shard_id = cluster::compute_shard_id(cmd_shard, self.shards_count);
+        let shard_id = topology::compute_shard_id(cmd_shard, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
         match self.shards.get(&shard_id) {
             Some(shard) => self.dispatch_local(shard.clone(), cmd).await,

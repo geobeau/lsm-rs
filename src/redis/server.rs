@@ -4,7 +4,7 @@ use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
     api,
-    cluster::Cluster,
+    topology::Topology,
     record,
     redis::{
         command::{ClientCmd, Command, RESPHandler},
@@ -17,10 +17,10 @@ use crate::{
 pub struct RESPServer {
     pub host_port: String,
     pub storage_proxy: StorageProxy,
-    pub cluster: Cluster,
+    pub cluster: Topology,
 }
 
-fn cluster_as_shards(cluster: &Cluster) -> Value {
+fn cluster_as_shards(cluster: &Topology) -> Value {
     let shards = cluster
         .reactor_allocations
         .iter()
@@ -129,8 +129,8 @@ impl RESPServer {
                                 panic!("Unexpected response")
                             }
                         }
-                        Command::Cluster(cluster_cmd) => match cluster_cmd {
-                            crate::redis::command::ClusterCmd::Info() => Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
+                        Command::Topology(cluster_cmd) => match cluster_cmd {
+                            crate::redis::command::TopologyCmd::Info() => Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
                                 (
                                     HashableValue::String(Cow::from("cluster_state")),
                                     Value::HashableValue(HashableValue::String(Cow::from("ok"))),
@@ -168,7 +168,7 @@ impl RESPServer {
                                     Value::HashableValue(HashableValue::Integer(1)),
                                 ),
                             ]))),
-                            crate::redis::command::ClusterCmd::Slots() => cluster_as_shards(&cluster),
+                            crate::redis::command::TopologyCmd::Slots() => cluster_as_shards(&cluster),
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
                             // TODO: get that through reflection

@@ -1,4 +1,4 @@
-use lsm_rs::cluster::{self, ClusteredReactor, Reactor};
+use lsm_rs::topology::{self, LocalTopology, Reactor};
 use lsm_rs::reactor::start_reactor;
 use std::net::Ipv4Addr;
 use std::thread;
@@ -36,7 +36,7 @@ fn main() {
         port += 1;
     }
 
-    let cluster = cluster::Cluster::new_with_reactors(opt.shard_total, reactors);
+    let cluster = topology::Topology::new_with_reactors(opt.shard_total, reactors);
     println!("{:?}", opt.data_dir);
 
     let mut reactor_id = 0;
@@ -45,7 +45,7 @@ fn main() {
         let data_dir = opt.data_dir.clone();
 
         let t = thread::spawn(move || {
-            start_reactor(ClusteredReactor { reactor, shards }, cluster, reactor_id, &data_dir);
+            start_reactor(LocalTopology { reactor, shards }, cluster, reactor_id, &data_dir);
         });
         shard_threads.push(t);
         reactor_id += 1

@@ -3,13 +3,13 @@ use std::{path::PathBuf, rc::Rc, time::Duration};
 use monoio::{join, time::sleep};
 
 use crate::{
-    cluster::{Cluster, ClusteredReactor},
+    topology::{Topology, LocalTopology},
     memcached::server::MemcachedBinaryServer,
     redis::server::RESPServer,
     storageproxy::StorageProxy,
 };
 
-pub fn start_reactor(clustered_reactor: ClusteredReactor, cluster: Cluster, reactor_id: u8, data_dir: &PathBuf) {
+pub fn start_reactor(clustered_reactor: LocalTopology, cluster: Topology, reactor_id: u8, data_dir: &PathBuf) {
     println!("Start reactor {reactor_id}");
 
     let urb = io_uring::IoUring::builder();
