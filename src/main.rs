@@ -40,12 +40,12 @@ fn main() {
     println!("{:?}", opt.data_dir);
 
     let mut reactor_id = 0;
-    for (reactor, ranges) in cluster.clone().reactor_allocations {
+    for (reactor, shards) in cluster.clone().reactor_allocations {
         let cluster = cluster.clone();
         let data_dir = opt.data_dir.clone();
 
         let t = thread::spawn(move || {
-            start_reactor(ClusteredReactor { reactor, ranges }, cluster, reactor_id, &data_dir);
+            start_reactor(ClusteredReactor { reactor, shards }, cluster, reactor_id, &data_dir);
         });
         shard_threads.push(t);
         reactor_id += 1

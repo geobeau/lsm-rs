@@ -8,7 +8,7 @@ use crate::{
 #[derive(Clone)]
 pub struct StorageProxy {
     pub shards: HashMap<u16, Rc<DataStore>>,
-    pub shard_count: u16,
+    pub shards_count: u16,
 }
 
 #[derive(Debug)]
@@ -21,13 +21,13 @@ impl StorageProxy {
     pub async fn new(clustered_reactor: &ClusteredReactor, cluster: &Cluster, data_dir: &PathBuf) -> StorageProxy {
         let mut proxy = StorageProxy {
             shards: HashMap::new(),
-            shard_count: cluster.shard_count,
+            shards_count: cluster.shards_count,
         };
 
-        for range in &clustered_reactor.ranges {
+        for slot in &clustered_reactor.shards {
             let mut shard_path = PathBuf::new();
-            shard_path.push(format!("{}", range.start));
-            proxy.add_shard(range.start, data_dir.join(shard_path)).await
+            shard_path.push(format!("{}", slot.start));
+            proxy.add_shard(slot.start, data_dir.join(shard_path)).await
         }
 
         return proxy
@@ -69,12 +69,12 @@ impl StorageProxy {
 
     pub async fn dispatch(&self, cmd: Command) -> Response {
         let cmd_shard = cmd.get_shard();
-        let range_start = cluster::compute_range_start(cmd_shard, self.shard_count);
+        let shard_id = cluster::compute_shard_id(cmd_shard, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
-        match self.shards.get(&range_start) {
+        match self.shards.get(&shard_id) {
             Some(ds) => self.dispatch_local(ds.clone(), cmd).await,
             None => {
-                println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", range_start, cmd_shard, cmd);
+                println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", shard_id, cmd_shard, cmd);
                 todo!(); // TODO: return a moved information
             }
         }

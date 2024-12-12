@@ -19,8 +19,8 @@ pub struct RESPServer {
     pub cluster: Cluster,
 }
 
-fn cluster_as_slots(cluster: &Cluster) -> Value {
-    let slots = cluster
+fn cluster_as_shards(cluster: &Cluster) -> Value {
+    let shards = cluster
         .reactor_allocations
         .iter()
         .flat_map(|(reactor, ranges)| {
@@ -52,7 +52,7 @@ fn cluster_as_slots(cluster: &Cluster) -> Value {
         })
         .collect();
 
-    return Value::NonHashableValue(NonHashableValue::Array(slots));
+    return Value::NonHashableValue(NonHashableValue::Array(shards));
 }
 
 impl RESPServer {
@@ -131,19 +131,19 @@ impl RESPServer {
                                     Value::HashableValue(HashableValue::String(Cow::from("ok"))),
                                 ),
                                 (
-                                    HashableValue::String(Cow::from("cluster_slots_assigned")),
+                                    HashableValue::String(Cow::from("cluster_shards_assigned")),
                                     Value::HashableValue(HashableValue::Integer(16384)),
                                 ),
                                 (
-                                    HashableValue::String(Cow::from("cluster_slots_ok")),
+                                    HashableValue::String(Cow::from("cluster_shards_ok")),
                                     Value::HashableValue(HashableValue::Integer(16384)),
                                 ),
                                 (
-                                    HashableValue::String(Cow::from("cluster_slots_pfail")),
+                                    HashableValue::String(Cow::from("cluster_shards_pfail")),
                                     Value::HashableValue(HashableValue::Integer(0)),
                                 ),
                                 (
-                                    HashableValue::String(Cow::from("cluster_slots_fail")),
+                                    HashableValue::String(Cow::from("cluster_shards_fail")),
                                     Value::HashableValue(HashableValue::Integer(0)),
                                 ),
                                 (
@@ -163,7 +163,7 @@ impl RESPServer {
                                     Value::HashableValue(HashableValue::Integer(1)),
                                 ),
                             ]))),
-                            crate::redis::command::ClusterCmd::Slots() => cluster_as_slots(&cluster),
+                            crate::redis::command::ClusterCmd::Slots() => cluster_as_shards(&cluster),
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
                             // TODO: get that through reflection

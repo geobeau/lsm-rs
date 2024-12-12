@@ -1,9 +1,9 @@
-use std::{char::MAX, collections::HashMap, hash::Hash, net::IpAddr};
+use std::{collections::HashMap, hash::Hash, net::IpAddr};
 
 pub const MAX_RANGE: u16 = 2u16.pow(14);
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct Range {
+pub struct Slot {
     pub start: u16,
     pub end: u16,
 }
@@ -17,28 +17,27 @@ pub struct Reactor {
 #[derive(Clone, Debug)]
 pub struct ClusteredReactor {
     pub reactor: Reactor,
-    pub ranges: Vec<Range>,
+    pub shards: Vec<Slot>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Cluster {
-    pub shard_count: u16,
-    pub reactor_allocations: HashMap<Reactor, Vec<Range>>,
+    pub shards_count: u16,
+    pub reactor_allocations: HashMap<Reactor, Vec<Slot>>,
 }
 
 impl Cluster {
-    pub fn new_with_reactors(shard_count: u16, reactors: Vec<Reactor>) -> Cluster {
-        let range = MAX_RANGE / shard_count;
+    pub fn new_with_reactors(shards_count: u16, reactors: Vec<Reactor>) -> Cluster {
         let mut offset = 0;
 
-        // Ensure 16k is divisible by shard_count
-        assert_eq!(MAX_RANGE % shard_count, 0);
+        // Ensure 16k is divisible by shards_count
+        assert_eq!(MAX_RANGE % shards_count, 0);
 
-        let mut ranges = Vec::with_capacity(shard_count as usize);
-        let range = MAX_RANGE / shard_count;
+        let mut ranges = Vec::with_capacity(shards_count as usize);
+        let range = MAX_RANGE / shards_count;
 
-        for i in 0..shard_count {
-            ranges.push(Range {
+        for i in 0..shards_count {
+            ranges.push(Slot {
                 start: offset,
                 end: offset + range,
             });
@@ -59,14 +58,14 @@ impl Cluster {
         }
 
         Cluster {
-            shard_count,
+            shards_count,
             reactor_allocations,
         }
     }
 }
 
-/// Align `shard` with the start of the range (range are determined by the number of shards)
-pub fn compute_range_start(shard: u16, total_shards: u16) -> u16 {
+/// Align `shard` with the proper slot (slot are determined by the number of shards)
+pub fn compute_shard_id(shard: u16, total_shards: u16) -> u16 {
     let multiple = MAX_RANGE / total_shards;
     return ((shard + multiple - 1) / multiple) * multiple - multiple;
 }

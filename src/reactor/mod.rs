@@ -30,11 +30,11 @@ pub fn start_flush_manager(ds: Rc<DataStore>) {
     });
 }
 
-pub fn start_stat_manager(ds: Rc<DataStore>, shard: u8) {
+pub fn start_stat_manager(ds: Rc<DataStore>, reactor: u8) {
     monoio::spawn(async move {
         loop {
             let stats = ds.get_stats();
-            println!("stats {shard}: {:?}", stats);
+            println!("stats reactor:{reactor}: {:?}", stats);
             sleep(Duration::from_millis(1000)).await
         }
     });
