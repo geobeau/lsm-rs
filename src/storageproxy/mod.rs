@@ -1,4 +1,8 @@
+mod shard;
+
 use std::{collections::HashMap, path::PathBuf, rc::Rc};
+
+use shard::Shard;
 
 use crate::{
     api::{Command, DeleteResp, GetResp, Response, SetResp},
@@ -8,8 +12,9 @@ use crate::{
 
 #[derive(Clone)]
 pub struct StorageProxy {
-    pub shards: HashMap<u16, Rc<DataStore>>,
+    pub shards: HashMap<u16, Rc<Shard>>,
     pub shards_count: u16,
+    reactor_id: u8,
 }
 
 #[derive(Debug)]
@@ -19,8 +24,9 @@ pub struct CommandHandle {
 }
 
 impl StorageProxy {
-    pub async fn new(clustered_reactor: &ClusteredReactor, cluster: &Cluster, data_dir: &PathBuf) -> StorageProxy {
+    pub async fn new(reactor_id: u8, clustered_reactor: &ClusteredReactor, cluster: &Cluster, data_dir: &PathBuf) -> StorageProxy {
         let mut proxy = StorageProxy {
+            reactor_id: reactor_id,
             shards: HashMap::new(),
             shards_count: cluster.shards_count,
         };
@@ -34,18 +40,18 @@ impl StorageProxy {
         proxy
     }
 
-    pub async fn dispatch_local(&self, datastore: Rc<DataStore>, cmd: Command) -> Response {
+    pub async fn dispatch_local(&self, shard: Rc<Shard>, cmd: Command) -> Response {
         match cmd {
             Command::Get(c) => {
-                let record = datastore.get(&c.key).await;
+                let record = shard.datastore.get(&c.key).await;
                 Response::Get(GetResp { record })
             }
             Command::Delete(c) => {
-                datastore.delete(&c.key);
+                shard.datastore.delete(&c.key);
                 Response::Delete(DeleteResp {})
             }
             Command::Set(c) => {
-                datastore.set(c.record);
+                shard.datastore.set(c.record);
                 Response::Set(SetResp {})
             }
         }
@@ -73,7 +79,7 @@ impl StorageProxy {
         let shard_id = cluster::compute_shard_id(cmd_shard, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
         match self.shards.get(&shard_id) {
-            Some(ds) => self.dispatch_local(ds.clone(), cmd).await,
+            Some(shard) => self.dispatch_local(shard.clone(), cmd).await,
             None => {
                 println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", shard_id, cmd_shard, cmd);
                 todo!(); // TODO: return a moved information
@@ -81,8 +87,8 @@ impl StorageProxy {
         }
     }
 
-    pub async fn add_shard(&mut self, range_start: u16, directory: PathBuf) {
-        self.shards.insert(range_start, Rc::from(DataStore::new(directory).await));
+    pub async fn add_shard(&mut self, range_start: u16, data_dir: PathBuf) {
+        self.shards.insert(range_start, Shard::new(self.reactor_id, data_dir).await);
     }
 
     // pub async fn spawn_remote_dispatch_handlers(&self, mut receiver: Receivers<CommandHandle>) {
