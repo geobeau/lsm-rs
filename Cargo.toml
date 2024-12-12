@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 byteorder = "1.5.0"
-futures = "0.3.30"
+futures = "0.3.31"
 rust-crypto = "0.2.36"
 # monoio = "0.2.4"
 monoio = { path = "../monoio/monoio", features = ["zero-copy"]}
@@ -17,6 +17,7 @@ async-trait = "^0.1.81"
 tokio = { version = "1.37.0", features = ["net"] }
 structopt = "0.3.26"
 crc16 = "0.4.0"
+async-channel = "2.3.1"
 
 [dev-dependencies]
 criterion = "0.4.0"

@@ -5,9 +5,7 @@ use std::{collections::HashMap, path::PathBuf, rc::Rc};
 use shard::Shard;
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp},
-    topology::{self, Topology, LocalTopology},
-    datastore::DataStore,
+    api::{Command, DeleteResp, GetResp, Response, SetResp}, datastore::DataStore, topology::{self, LocalTopology, Slot, Topology}
 };
 
 #[derive(Clone)]
@@ -24,14 +22,14 @@ pub struct CommandHandle {
 }
 
 impl StorageProxy {
-    pub async fn new(reactor_id: u8, clustered_reactor: &LocalTopology, cluster: &Topology, data_dir: &PathBuf) -> StorageProxy {
+    pub async fn new(reactor_id: u8, shards: &Vec<Slot>, topology: &Topology, data_dir: &PathBuf) -> StorageProxy {
         let mut proxy = StorageProxy {
             reactor_id: reactor_id,
             shards: HashMap::new(),
-            shards_count: cluster.shards_count,
+            shards_count: topology.shards_count,
         };
 
-        for slot in &clustered_reactor.shards {
+        for slot in shards {
             let mut shard_path = PathBuf::new();
             shard_path.push(format!("{}", slot.start));
             proxy.add_shard(slot.start, data_dir.join(shard_path)).await

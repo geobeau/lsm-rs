@@ -17,7 +17,8 @@ use crate::{
 pub struct RESPServer {
     pub host_port: String,
     pub storage_proxy: StorageProxy,
-    pub cluster: Topology,
+    // TODO: have the server request that from storage proxy
+    pub topology: Topology,
 }
 
 fn cluster_as_shards(cluster: &Topology) -> Value {
@@ -64,7 +65,7 @@ impl RESPServer {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
             let storage_proxy = self.storage_proxy.clone();
-            let cluster = self.cluster.clone();
+            let cluster = self.topology.clone();
             let reader = BufReader::new(stream);
             monoio::spawn(async move {
                 let mut handler = RESPHandler { stream: reader };

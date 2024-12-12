@@ -7,3 +7,4 @@ pub mod record;
 pub mod redis;
 pub mod storageproxy;
 pub mod time;
+pub mod cluster;

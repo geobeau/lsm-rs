@@ -9,25 +9,26 @@ pub struct Slot {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Reactor {
+pub struct ReactorMetadata {
+    pub id: u8,
     pub ip: IpAddr,
     pub port: u16,
 }
 
 #[derive(Clone, Debug)]
 pub struct LocalTopology {
-    pub reactor: Reactor,
+    pub reactor: ReactorMetadata,
     pub shards: Vec<Slot>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Topology {
     pub shards_count: u16,
-    pub reactor_allocations: HashMap<Reactor, Vec<Slot>>,
+    pub reactor_allocations: HashMap<ReactorMetadata, Vec<Slot>>,
 }
 
 impl Topology {
-    pub fn new_with_reactors(shards_count: u16, reactors: Vec<Reactor>) -> Topology {
+    pub fn new_with_reactors(shards_count: u16, reactors: Vec<ReactorMetadata>) -> Topology {
         let mut offset = 0;
 
         // Ensure 16k is divisible by shards_count
