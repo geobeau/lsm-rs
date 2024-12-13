@@ -34,11 +34,11 @@ impl Topology {
         // Ensure 16k is divisible by shards_count
         assert_eq!(MAX_RANGE % shards_count, 0);
 
-        let mut slots = Vec::with_capacity(shards_count as usize);
+        let mut shards = Vec::with_capacity(shards_count as usize);
         let range = MAX_RANGE / shards_count;
 
         for _ in 0..shards_count {
-            slots.push(ShardRange {
+            shards.push(ShardRange {
                 start: offset,
                 end: offset + range,
             });
@@ -46,16 +46,17 @@ impl Topology {
         }
 
         // Allocate ranges to reactors in round robin fashion
-        let offset = 0;
         let mut reactor_allocations = HashMap::with_capacity(reactors.len());
         for reactor in &reactors {
             reactor_allocations.insert(reactor.clone(), Vec::new());
         }
 
-        for slot in slots {
+        let mut offset = 0;
+        for slot in shards {
             let reactor = &reactors[offset % reactors.len()];
-            let node_slots = reactor_allocations.get_mut(reactor).unwrap();
-            node_slots.push(slot);
+            let reactor_shards = reactor_allocations.get_mut(reactor).unwrap();
+            reactor_shards.push(slot);
+            offset += 1;
         }
 
         Topology {
