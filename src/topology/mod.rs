@@ -40,7 +40,7 @@ impl Topology {
         for _ in 0..shards_count {
             shards.push(ShardRange {
                 start: offset,
-                end: offset + range,
+                end: offset + range - 1,
             });
             offset += range
         }

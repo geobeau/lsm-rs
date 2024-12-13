@@ -11,3 +11,4 @@ r = RedisCluster(host='localhost', port=6379,  protocol=3)
 r.set('foo', 'bar')
 assert r.get('foo') == b'bar'
 assert r.get('bob') is None
+assert r.get('memtier-1168204') is None

@@ -16,8 +16,8 @@ monoio-compat = "0.1.2"
 async-trait = "^0.1.81"
 tokio = { version = "1.37.0", features = ["net"] }
 structopt = "0.3.26"
-crc16 = "0.4.0"
 async-channel = "2.3.1"
+crc16-xmodem-fast = "0.4.0"
 
 [dev-dependencies]
 criterion = "0.4.0"

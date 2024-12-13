@@ -119,14 +119,14 @@ impl StorageProxy {
     }
 
     pub async fn dispatch(&self, cmd: Command) -> Response {
-        let cmd_shard = cmd.get_shard();
-        let shard_id = topology::compute_shard_id(cmd_shard, self.shards_count);
+        let cmd_slot = cmd.get_slot();
+        let shard_id = topology::compute_shard_id(cmd_slot, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
-
+    
         match self.shards.get_shard(&shard_id) {
             Some(shard) => self.dispatch_local(shard.clone(), cmd).await,
             None => {
-                println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", shard_id, cmd_shard, cmd);
+                println!("[reactor {}] shard {} not managed by this reactor (slot: {}, crc16: {}, cmd: {:?})", self.reactor_metadata.id, shard_id, cmd_slot, cmd.get_crc16(), cmd);
                 todo!(); // TODO: return a moved information
             }
         }

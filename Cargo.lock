@@ -222,10 +222,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc16"
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
+
+[[package]]
+name = "crc-fast-gen"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
+checksum = "3b5837bc1b707d698e72031ae2e35523ec84ef29be8b6bf0e95aac9ff138241d"
+
+[[package]]
+name = "crc16-xmodem-fast"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b701a12d23b8f88f0e7d814a7cdca14b040aeff801565904d546370e677e699"
+dependencies = [
+ "core_detect",
+ "crc-fast-gen",
+]
 
 [[package]]
 name = "criterion"
@@ -551,7 +567,7 @@ dependencies = [
  "async-channel",
  "async-trait",
  "byteorder",
- "crc16",
+ "crc16-xmodem-fast",
  "criterion",
  "futures",
  "io-uring",
