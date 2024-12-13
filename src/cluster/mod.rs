@@ -36,6 +36,7 @@ impl ClusterManager {
     }
 
     async fn broadcast_topology(&self) {
+        println!("{:?}", self.topology);
         for (_, local_peer) in &self.mesh {
             local_peer.send(self.topology.clone()).await.unwrap();
         }

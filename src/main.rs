@@ -43,7 +43,7 @@ fn main() {
 
         let data_dir = opt.data_dir.clone();
         let (sender, receiver) = async_channel::unbounded();
-        reactors.push(Reactor::new(metadata, receiver, data_dir));
+        reactors.push(Reactor::new(metadata, opt.shard_total, receiver, data_dir));
         mesh.insert(reactor_id as u8, sender);
         port += 1;
     }

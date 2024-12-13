@@ -1,28 +1,23 @@
-use std::{borrow::Cow, collections::HashMap, vec};
+use std::{borrow::Cow, collections::HashMap, rc::Rc, vec};
 
 use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
-    api,
-    topology::Topology,
-    record,
-    redis::{
+    api, record, redis::{
         command::{ClientCmd, Command, RESPHandler},
         resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value},
-    },
-    storageproxy::StorageProxy,
+    }, storageproxy::StorageProxy, topology::{self, Topology}
 };
 
 // Serve the Redis serialization protocol (RESP)
 pub struct RESPServer {
     pub host_port: String,
-    pub storage_proxy: StorageProxy,
-    // TODO: have the server request that from storage proxy
-    pub topology: Topology,
+    pub storage_proxy: Rc<StorageProxy>,
 }
 
-fn cluster_as_shards(cluster: &Topology) -> Value {
-    let shards = cluster
+fn cluster_as_shards(storage_proxy: &StorageProxy) -> Value {
+    let topology = storage_proxy.get_topology().unwrap();
+    let shards = topology
         .reactor_allocations
         .iter()
         .flat_map(|(reactor, ranges)| {
@@ -65,7 +60,6 @@ impl RESPServer {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
             let storage_proxy = self.storage_proxy.clone();
-            let cluster = self.topology.clone();
             let reader = BufReader::new(stream);
             monoio::spawn(async move {
                 let mut handler = RESPHandler { stream: reader };
@@ -169,7 +163,7 @@ impl RESPServer {
                                     Value::HashableValue(HashableValue::Integer(1)),
                                 ),
                             ]))),
-                            crate::redis::command::TopologyCmd::Slots() => cluster_as_shards(&cluster),
+                            crate::redis::command::TopologyCmd::Slots() => cluster_as_shards(&storage_proxy),
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
                             // TODO: get that through reflection

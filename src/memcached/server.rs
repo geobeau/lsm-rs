@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
@@ -7,7 +9,7 @@ use crate::{
 
 pub struct MemcachedBinaryServer {
     pub host_port: String,
-    pub storage_proxy: StorageProxy,
+    pub storage_proxy: Rc<StorageProxy>,
 }
 
 impl MemcachedBinaryServer {

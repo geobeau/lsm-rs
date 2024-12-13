@@ -6,20 +6,39 @@ use crate::{
     cluster::ClusterManager, memcached::server::MemcachedBinaryServer, redis::server::RESPServer, storageproxy::StorageProxy, topology::{LocalTopology, ReactorMetadata, Topology}
 };
 
+pub struct TopologyUpdater {
+    receiver: async_channel::Receiver<Topology>,
+    storage_proxy: Rc<StorageProxy>,
+}
+
+impl TopologyUpdater {
+    pub async fn start(&self) {
+        loop {
+            println!("Waiting for new topology");
+            let topology = self.receiver.recv().await.unwrap();
+            println!("Received new topology");
+            self.storage_proxy.apply_new_topology(&topology).await;
+        }
+    }
+}
+
 pub struct Reactor {
     metadata: ReactorMetadata,
     receiver: async_channel::Receiver<Topology>,
     data_dir: PathBuf,
-    cm: Option<ClusterManager>
+    cm: Option<ClusterManager>,
+    shard_total: u16
 }
 
+
 impl Reactor {
-    pub fn new(reactor: ReactorMetadata, receiver: async_channel::Receiver<Topology>, data_dir: PathBuf) -> Reactor {
+    pub fn new(reactor: ReactorMetadata, shard_total: u16, receiver: async_channel::Receiver<Topology>, data_dir: PathBuf) -> Reactor {
         Reactor {
             metadata: reactor,
             receiver,
             data_dir,
             cm: None,
+            shard_total,
         }
 
     }
@@ -55,15 +74,17 @@ impl Reactor {
                 None => (),
             };
 
-            let topology = self.receiver.recv().await.unwrap();
-            let local_shards = topology.reactor_allocations.get(&self.metadata).unwrap();
 
-            let storage_proxy = StorageProxy::new(self.metadata.id, local_shards, &topology, &self.data_dir).await;
+            let storage_proxy = Rc::from(StorageProxy::new(self.metadata.clone(), self.shard_total, &self.data_dir).await);
+
+            let topology_updated = TopologyUpdater {
+                receiver: self.receiver.clone(),
+                storage_proxy: storage_proxy.clone(),
+            };
 
             let resp = RESPServer {
                 host_port: format!("127.0.0.1:{}", self.metadata.port),
                 storage_proxy: storage_proxy.clone(),
-                topology,
             };
             let memcached_port = 11211 + self.metadata.id as u64;
             let memcached = MemcachedBinaryServer {
@@ -71,7 +92,7 @@ impl Reactor {
                 storage_proxy: storage_proxy.clone(),
             };
 
-            join!(resp.listen(), memcached.listen());
+            join!(resp.listen(), memcached.listen(), topology_updated.start());
             println!("Terminated");
         });
     }

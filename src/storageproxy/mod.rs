@@ -1,19 +1,13 @@
 mod shard;
 
-use std::{collections::HashMap, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, path::PathBuf, rc::Rc};
 
 use shard::Shard;
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp}, datastore::DataStore, topology::{self, LocalTopology, Slot, Topology}
+    api::{Command, DeleteResp, GetResp, Response, SetResp}, topology::{self, ReactorMetadata, Topology}
 };
 
-#[derive(Clone)]
-pub struct StorageProxy {
-    pub shards: HashMap<u16, Rc<Shard>>,
-    pub shards_count: u16,
-    reactor_id: u8,
-}
 
 #[derive(Debug)]
 pub struct CommandHandle {
@@ -21,21 +15,90 @@ pub struct CommandHandle {
     // pub sender: SharedSender<Response>,
 }
 
-impl StorageProxy {
-    pub async fn new(reactor_id: u8, shards: &Vec<Slot>, topology: &Topology, data_dir: &PathBuf) -> StorageProxy {
-        let mut proxy = StorageProxy {
-            reactor_id: reactor_id,
-            shards: HashMap::new(),
-            shards_count: topology.shards_count,
-        };
 
-        for slot in shards {
+/// Provide safe access to shards
+struct Shards {
+    shards: RefCell<HashMap<u16, Rc<Shard>>>,
+}
+
+// Since it is using refcell, no await should be used while borrowing `shards`
+impl Shards {
+    pub fn new() -> Shards {
+        Shards {
+            shards: RefCell::new(HashMap::new())
+        }
+    }
+
+    pub fn get_shard(&self, shard_id: &u16) -> Option<Rc<Shard>> {
+        self.shards.borrow().get(&shard_id).cloned()
+    }
+
+    pub fn insert_shard(&self, shard_id: u16, shard: Rc<Shard>) {
+        self.shards.borrow_mut().insert(shard_id, shard);
+    }
+
+    pub fn remove_shard(&self, shard_id: &u16) -> Option<Rc<Shard>> {
+        self.shards.borrow_mut().remove(&shard_id)
+    }
+
+    pub fn keys(&self) -> Vec<u16> {
+        return self.shards.borrow().keys().cloned().collect()
+    }
+
+    pub fn len(&self) -> usize {
+        return self.shards.borrow().len()
+    }
+    
+}
+
+pub struct StorageProxy {
+    shards: Shards,
+    pub shards_count: u16,
+    data_dir: PathBuf,
+    reactor_metadata: ReactorMetadata,
+    topology:RefCell<Option<Rc<Topology>>>
+}
+
+impl StorageProxy {
+    pub async fn new(reactor_metadata: ReactorMetadata, shards_count: u16, data_dir: &PathBuf) -> StorageProxy {
+        StorageProxy {
+            reactor_metadata,
+            shards: Shards::new(),
+            shards_count,
+            data_dir: data_dir.clone(),
+            topology: RefCell::from(None),
+        }
+    }
+
+
+    pub async fn apply_new_topology(&self, topology: &Topology) {
+        let shard_ranges = topology.reactor_allocations.get(&self.reactor_metadata).unwrap();
+
+        let mut incoming_shards = HashSet::with_capacity(shard_ranges.len());
+        shard_ranges.into_iter().for_each(|sr| {incoming_shards.insert(sr.start);});
+
+        let mut existing_shards = HashSet::with_capacity(self.shards.len());
+        self.shards.keys().into_iter().for_each(|s| {existing_shards.insert(s);});
+
+        
+        let shards_to_add = incoming_shards.difference(&existing_shards);
+        let shards_to_remove = existing_shards.difference(&incoming_shards);
+
+        for start in shards_to_add {
             let mut shard_path = PathBuf::new();
-            shard_path.push(format!("{}", slot.start));
-            proxy.add_shard(slot.start, data_dir.join(shard_path)).await
+            shard_path.push(format!("{}", start));
+            let shard = Rc::from(Shard::new(self.reactor_metadata.id, self.data_dir.join(shard_path)).await);
+            self.shards.insert_shard(*start, shard);
         }
 
-        proxy
+        for start in shards_to_remove {
+            match self.shards.remove_shard(start) {
+                Some(_) => todo!(),
+                None => todo!(),
+            }
+        }
+
+        self.topology.borrow_mut().insert(Rc::from(topology.clone()));
     }
 
     pub async fn dispatch_local(&self, shard: Rc<Shard>, cmd: Command) -> Response {
@@ -55,28 +118,12 @@ impl StorageProxy {
         }
     }
 
-    // pub async fn dispatch_remote(&self, cmd: Command, shard_id: usize) -> Response {
-    //     // println!("Dispatching to {}, from {} (of {})", shard_id, self.cur_shard, self.nr_shards);
-    //     let sender = self.sender.as_ref().unwrap();
-    //     let (resp_sender, resp_receiver) = shared_channel::new_bounded(1);
-    //     sender
-    //         .send_to(
-    //             shard_id,
-    //             CommandHandle {
-    //                 command: cmd,
-    //                 sender: resp_sender,
-    //             },
-    //         )
-    //         .await
-    //         .unwrap();
-    //     resp_receiver.connect().await.recv().await.unwrap()
-    // }
-
     pub async fn dispatch(&self, cmd: Command) -> Response {
         let cmd_shard = cmd.get_shard();
         let shard_id = topology::compute_shard_id(cmd_shard, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
-        match self.shards.get(&shard_id) {
+
+        match self.shards.get_shard(&shard_id) {
             Some(shard) => self.dispatch_local(shard.clone(), cmd).await,
             None => {
                 println!("shard {} not managed by this reactor (crc16: {}, cmd: {:?})", shard_id, cmd_shard, cmd);
@@ -85,26 +132,7 @@ impl StorageProxy {
         }
     }
 
-    pub async fn add_shard(&mut self, range_start: u16, data_dir: PathBuf) {
-        self.shards.insert(range_start, Shard::new(self.reactor_id, data_dir).await);
+    pub fn get_topology(&self) -> Option<Rc<Topology>> {
+        return self.topology.borrow().clone();
     }
-
-    // pub async fn spawn_remote_dispatch_handlers(&self, mut receiver: Receivers<CommandHandle>) {
-    //     for (_i, stream) in receiver.streams() {
-    //         let sp = self.clone();
-    //         monoio::spawn(async move {
-    //             // let result stream.recv().await
-    //             while let Some(handle) = stream.recv().await {
-    //                 let local_proxy = sp.clone();
-    //                 monoio::spawn(async move { local_proxy.handle_command(handle).await });
-    //             }
-    //             panic!("Stop dispatcher");
-    //         });
-    //     }
-    // }
-
-    // pub async fn handle_command(&self, handle: CommandHandle) {
-    //     let sender = handle.sender.connect().await;
-    //     sender.send(self.dispatch_local(handle.command).await).await.unwrap();
-    // }
 }

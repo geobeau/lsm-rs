@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash, net::IpAddr};
 pub const MAX_RANGE: u16 = 2u16.pow(14);
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct Slot {
+pub struct ShardRange {
     pub start: u16,
     pub end: u16,
 }
@@ -18,13 +18,13 @@ pub struct ReactorMetadata {
 #[derive(Clone, Debug)]
 pub struct LocalTopology {
     pub reactor: ReactorMetadata,
-    pub shards: Vec<Slot>,
+    pub shards: Vec<ShardRange>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Topology {
     pub shards_count: u16,
-    pub reactor_allocations: HashMap<ReactorMetadata, Vec<Slot>>,
+    pub reactor_allocations: HashMap<ReactorMetadata, Vec<ShardRange>>,
 }
 
 impl Topology {
@@ -38,7 +38,7 @@ impl Topology {
         let range = MAX_RANGE / shards_count;
 
         for _ in 0..shards_count {
-            slots.push(Slot {
+            slots.push(ShardRange {
                 start: offset,
                 end: offset + range,
             });
