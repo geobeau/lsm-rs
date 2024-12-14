@@ -5,6 +5,11 @@ use crate::topology::{self, ReactorMetadata, Topology};
 pub struct ClusterManager {
     mesh: HashMap<u8, async_channel::Sender<Topology>>,
     topology: Topology,
+    receiver: async_channel::Receiver<ClusterMessage>,
+}
+
+pub enum ClusterMessage {
+    Join,
 }
 
 impl ClusterManager {
@@ -12,6 +17,7 @@ impl ClusterManager {
         local_reactors: Vec<ReactorMetadata>,
         shards_total: u16,
         mesh: HashMap<u8, async_channel::Sender<Topology>>,
+        receiver: async_channel::Receiver<ClusterMessage>,
         contact_point: Option<String>,
     ) -> ClusterManager {
         let topology = match contact_point {
@@ -19,7 +25,7 @@ impl ClusterManager {
             None => ClusterManager::init_topology(local_reactors, shards_total),
         };
 
-        ClusterManager { mesh, topology }
+        ClusterManager { mesh, topology, receiver }
     }
 
     fn init_topology(local_reactors: Vec<ReactorMetadata>, shards_total: u16) -> Topology {

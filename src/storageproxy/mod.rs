@@ -11,6 +11,7 @@ use shard::Shard;
 
 use crate::{
     api::{Command, DeleteResp, GetResp, Response, SetResp},
+    cluster::ClusterMessage,
     topology::{self, ReactorMetadata, Topology},
 };
 
@@ -60,16 +61,23 @@ pub struct StorageProxy {
     data_dir: PathBuf,
     reactor_metadata: ReactorMetadata,
     topology: RefCell<Option<Rc<Topology>>>,
+    cluster_sender: async_channel::Sender<ClusterMessage>,
 }
 
 impl StorageProxy {
-    pub async fn new(reactor_metadata: ReactorMetadata, shards_count: u16, data_dir: &PathBuf) -> StorageProxy {
+    pub fn new(
+        reactor_metadata: ReactorMetadata,
+        shards_count: u16,
+        cluster_sender: async_channel::Sender<ClusterMessage>,
+        data_dir: &PathBuf,
+    ) -> StorageProxy {
         StorageProxy {
             reactor_metadata,
             shards: Shards::new(),
             shards_count,
             data_dir: data_dir.clone(),
             topology: RefCell::from(None),
+            cluster_sender,
         }
     }
 

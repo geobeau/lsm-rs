@@ -1,9 +1,9 @@
 use std::{path::PathBuf, rc::Rc};
 
-use monoio::{join};
+use monoio::join;
 
 use crate::{
-    cluster::ClusterManager,
+    cluster::{ClusterManager, ClusterMessage},
     memcached::server::MemcachedBinaryServer,
     redis::server::RESPServer,
     storageproxy::StorageProxy,
@@ -32,14 +32,22 @@ pub struct Reactor {
     data_dir: PathBuf,
     cm: Option<ClusterManager>,
     shard_total: u16,
+    cluster_sender: async_channel::Sender<ClusterMessage>,
 }
 
 impl Reactor {
-    pub fn new(reactor: ReactorMetadata, shard_total: u16, receiver: async_channel::Receiver<Topology>, data_dir: PathBuf) -> Reactor {
+    pub fn new(
+        reactor: ReactorMetadata,
+        shard_total: u16,
+        receiver: async_channel::Receiver<Topology>,
+        cluster_sender: async_channel::Sender<ClusterMessage>,
+        data_dir: PathBuf,
+    ) -> Reactor {
         Reactor {
             metadata: reactor,
             receiver,
             data_dir,
+            cluster_sender,
             cm: None,
             shard_total,
         }
@@ -74,7 +82,12 @@ impl Reactor {
                 None => (),
             };
 
-            let storage_proxy = Rc::from(StorageProxy::new(self.metadata.clone(), self.shard_total, &self.data_dir).await);
+            let storage_proxy = Rc::from(StorageProxy::new(
+                self.metadata.clone(),
+                self.shard_total,
+                self.cluster_sender.clone(),
+                &self.data_dir,
+            ));
 
             let topology_updated = TopologyUpdater {
                 receiver: self.receiver.clone(),

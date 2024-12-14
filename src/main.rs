@@ -32,6 +32,9 @@ fn main() {
     let mut port = 6379;
     let mut mesh: HashMap<u8, async_channel::Sender<Topology>> = HashMap::new();
 
+    // Chan to send message to the cluster manager
+    let (cluster_sender, cluster_receiver) = async_channel::unbounded();
+
     for reactor_id in 0..opt.reactors_total {
         let metadata = ReactorMetadata {
             id: reactor_id as u8,
@@ -41,13 +44,13 @@ fn main() {
         reactor_metadatas.push(metadata.clone());
 
         let data_dir = opt.data_dir.clone();
-        let (sender, receiver) = async_channel::unbounded();
-        reactors.push(Reactor::new(metadata, opt.shard_total, receiver, data_dir));
-        mesh.insert(reactor_id as u8, sender);
+        let (mesh_sender, mesh_receiver) = async_channel::unbounded();
+        reactors.push(Reactor::new(metadata, opt.shard_total, mesh_receiver, cluster_sender.clone(), data_dir));
+        mesh.insert(reactor_id as u8, mesh_sender);
         port += 1;
     }
 
-    let cm = ClusterManager::new(reactor_metadatas.clone(), opt.shard_total, mesh, None);
+    let cm = ClusterManager::new(reactor_metadatas.clone(), opt.shard_total, mesh, cluster_receiver, None);
     reactors[0].cluster_manager(cm);
 
     println!("{:?}", opt.data_dir);
