@@ -45,7 +45,7 @@ pub fn redis_non_hashable_value_to_bytes(value: &NonHashableValue, buffer: &mut 
             // TODO: hopefully this doesn't create an actual string
             buffer.extend_from_slice(vec.len().to_string().as_bytes());
             buffer.extend_from_slice(SEPARATOR);
-            vec.iter().for_each(|val| redis_value_to_bytes(val, buffer));
+            vec.iter().for_each(|val| val.write_bytes(buffer));
             // buffer.extend_from_slice(SEPARATOR);
         }
         NonHashableValue::Float(_) => todo!(),
@@ -56,19 +56,8 @@ pub fn redis_non_hashable_value_to_bytes(value: &NonHashableValue, buffer: &mut 
             buffer.extend_from_slice(SEPARATOR);
             map.iter().for_each(|(key, val)| {
                 redis_hashable_value_to_bytes(key, buffer);
-                redis_value_to_bytes(val, buffer);
+                val.write_bytes(buffer)
             });
-        }
-    }
-}
-
-pub fn redis_value_to_bytes(value: &Value, buffer: &mut Vec<u8>) {
-    match value {
-        Value::HashableValue(hashable_value) => redis_hashable_value_to_bytes(hashable_value, buffer),
-        Value::NonHashableValue(non_hashable_value) => redis_non_hashable_value_to_bytes(non_hashable_value, buffer),
-        Value::Null => {
-            buffer.push(b'_');
-            buffer.extend_from_slice(SEPARATOR);
         }
     }
 }
@@ -98,6 +87,23 @@ impl<'a> Value<'a> {
             Value::NonHashableValue(_) => todo!(),
             Value::Null => todo!(),
         }
+    }
+
+    fn write_bytes(&self, buffer: &mut Vec<u8>) {
+        match self {
+            Value::HashableValue(hashable_value) => redis_hashable_value_to_bytes(hashable_value, buffer),
+            Value::NonHashableValue(non_hashable_value) => redis_non_hashable_value_to_bytes(non_hashable_value, buffer),
+            Value::Null => {
+                buffer.push(b'_');
+                buffer.extend_from_slice(SEPARATOR);
+            }
+        };
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut resp_bytes = vec![];
+        self.write_bytes(&mut resp_bytes);
+        resp_bytes
     }
 }
 

@@ -1,11 +1,13 @@
 use core::str;
+use std::borrow::Cow;
 
 use monoio::io::{AsyncBufRead, AsyncWriteRentExt, BufReader};
 
 use crate::{
-    api,
+    api::{self, Join},
     record::{Key, Record},
     redis::resp::{parse, NonHashableValue},
+    topology::ReactorMetadata,
 };
 
 use super::resp::{HashableValue, Value};
@@ -118,11 +120,62 @@ fn parse_get_command(args: &[Value]) -> Command {
 pub enum ClusterCmd {
     Slots(),
     Info(),
-    // SetInfo(SetInfoCmd)
+    Join(JoinCmd),
 }
 
 const CMD_CLUSTER_SLOT: &str = "SLOTS";
 const CMD_CLUSTER_INFO: &str = "INFO";
+
+const CMD_CLUSTER_JOIN: &str = "JOIN";
+#[derive(Debug, Clone)]
+pub struct JoinCmd {
+    reactors: Vec<ReactorMetadata>,
+}
+
+impl JoinCmd {
+    pub fn to_api_command(&self) -> api::Command {
+        api::Command::Cluster(api::ClusterCommand::Join(Join {
+            reactors: self.reactors.clone(),
+        }))
+    }
+}
+
+fn parse_cluster_join_command(args: &[Value]) -> Command {
+    let raw_reactors = match &args[2] {
+        Value::NonHashableValue(non_hashable_value) => match non_hashable_value {
+            NonHashableValue::Array(vec) => vec,
+            _ => todo!(),
+        },
+        _ => todo!(),
+    };
+
+    let reactors = raw_reactors
+        .iter()
+        .map(|value| {
+            let raw_reactor = match value {
+                Value::NonHashableValue(non_hashable_value) => match non_hashable_value {
+                    NonHashableValue::Map(vec) => vec,
+                    _ => todo!(),
+                },
+                _ => todo!(),
+            };
+
+            let node_id = raw_reactor.get(&HashableValue::String(Cow::from("node_id"))).unwrap();
+            let id = raw_reactor.get(&HashableValue::String(Cow::from("id"))).unwrap();
+            let ip = raw_reactor.get(&HashableValue::String(Cow::from("ip"))).unwrap();
+            let port = raw_reactor.get(&HashableValue::String(Cow::from("port"))).unwrap();
+
+            ReactorMetadata {
+                node_id: node_id.try_as_str().unwrap().parse().unwrap(),
+                id: id.try_as_str().unwrap().parse().unwrap(),
+                ip: ip.try_as_str().unwrap().parse().unwrap(),
+                port: port.try_as_str().unwrap().parse().unwrap(),
+            }
+        })
+        .collect();
+
+    Command::Cluster(ClusterCmd::Join(JoinCmd { reactors }))
+}
 
 const CMD_CLUSTER: &str = "CLUSTER";
 fn parse_cluster_command(args: &[Value]) -> Command {
@@ -130,6 +183,7 @@ fn parse_cluster_command(args: &[Value]) -> Command {
     match sub_command {
         CMD_CLUSTER_SLOT => Command::Cluster(ClusterCmd::Slots()),
         CMD_CLUSTER_INFO => Command::Cluster(ClusterCmd::Info()),
+        CMD_CLUSTER_JOIN => parse_cluster_join_command(args),
         _ => todo!(),
     }
 }

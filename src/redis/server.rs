@@ -3,12 +3,13 @@ use std::{borrow::Cow, collections::HashMap, rc::Rc, vec};
 use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
-    api, record,
+    api,
     redis::{
         command::{ClientCmd, Command, RESPHandler},
-        resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value},
+        resp::{HashableValue, NonHashableValue, Value},
     },
     storageproxy::StorageProxy,
+    topology::{ReactorMetadata, ShardRange, Topology},
 };
 
 // Serve the Redis serialization protocol (RESP)
@@ -17,8 +18,54 @@ pub struct RESPServer {
     pub storage_proxy: Rc<StorageProxy>,
 }
 
-fn cluster_as_shards(storage_proxy: &StorageProxy) -> Value {
-    let topology = storage_proxy.get_topology().unwrap();
+fn reactor_metadata_to_resp(reactor: &ReactorMetadata) -> Value {
+    let mut map = HashMap::with_capacity(4);
+    map.insert(
+        HashableValue::String(Cow::from("node_id")),
+        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.node_id)))),
+    );
+    map.insert(
+        HashableValue::String(Cow::from("id")),
+        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.id)))),
+    );
+    map.insert(
+        HashableValue::String(Cow::from("ip")),
+        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.ip)))),
+    );
+    map.insert(
+        HashableValue::String(Cow::from("port")),
+        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.port)))),
+    );
+    Value::NonHashableValue(NonHashableValue::Map(map))
+}
+
+fn range_to_resp(range: &ShardRange) -> Value {
+    return Value::NonHashableValue(NonHashableValue::Array(vec![
+        Value::HashableValue(HashableValue::Integer(range.start as i64)),
+        Value::HashableValue(HashableValue::Integer(range.end as i64)),
+    ]));
+}
+
+/// Custom topology response only for internal use
+fn cluster_topology_response(topology: &Topology) -> Value {
+    let shards = topology
+        .reactor_allocations
+        .iter()
+        .map(|(reactor, ranges)| {
+            let resp_ranges: Vec<Value<'_>> = ranges.iter().map(|shard_range| range_to_resp(shard_range)).collect();
+
+            Value::NonHashableValue(NonHashableValue::Array(vec![
+                reactor_metadata_to_resp(reactor),
+                Value::NonHashableValue(NonHashableValue::Array(resp_ranges)),
+            ]))
+        })
+        .collect();
+
+    return Value::NonHashableValue(NonHashableValue::Array(shards));
+}
+
+// Return a redis compatible topology
+fn cluster_shards_response(topology: &Topology) -> Value {
     let shards = topology
         .reactor_allocations
         .iter()
@@ -77,14 +124,15 @@ impl RESPServer {
                         },
                     };
 
-                    let tmp_record: record::Record;
-                    let resp = match redis_command {
+                    // let tmp_record: record::Record;
+                    let resp_bytes: Vec<u8> = match redis_command {
                         Command::Hello(hello_cmd) => {
                             if hello_cmd.version != '3' {
                                 Value::HashableValue(HashableValue::Error(
                                     Cow::from("NOPROTO"),
                                     Cow::from("sorry, this protocol version is not supported."),
                                 ))
+                                .to_bytes()
                             } else {
                                 Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
                                     (
@@ -103,30 +151,35 @@ impl RESPServer {
                                     ),
                                     (HashableValue::String(Cow::from("modules")), Value::Null),
                                 ])))
+                                .to_bytes()
                             }
                         }
                         Command::Client(client_cmd) => match client_cmd {
-                            ClientCmd::SetInfo(_) => Value::HashableValue(HashableValue::String(Cow::from("OK"))),
+                            ClientCmd::SetInfo(_) => Value::HashableValue(HashableValue::String(Cow::from("OK"))).to_bytes(),
                         },
                         Command::Set(set_cmd) => {
                             // TODO: should return result
                             let _ = storage_proxy.dispatch(set_cmd.to_api_command()).await;
-                            Value::HashableValue(HashableValue::String(Cow::from("OK")))
+                            Value::HashableValue(HashableValue::String(Cow::from("OK"))).to_bytes()
                         }
                         Command::Get(get_cmd) => {
                             if let api::Response::Get(resp) = storage_proxy.dispatch(get_cmd.to_api_command()).await {
                                 match resp.record {
-                                    Some(r) => {
-                                        tmp_record = r;
-                                        Value::HashableValue(HashableValue::Blob(&tmp_record.value))
-                                    }
-                                    None => Value::Null,
+                                    Some(r) => Value::HashableValue(HashableValue::Blob(&r.value)).to_bytes(),
+                                    None => Value::Null.to_bytes(),
                                 }
                             } else {
                                 panic!("Unexpected response")
                             }
                         }
                         Command::Cluster(cluster_cmd) => match cluster_cmd {
+                            crate::redis::command::ClusterCmd::Join(join_cmd) => {
+                                if let api::Response::ClusterTopology(resp) = storage_proxy.dispatch(join_cmd.to_api_command()).await {
+                                    cluster_topology_response(&resp.topology).to_bytes()
+                                } else {
+                                    panic!("Unexpected response")
+                                }
+                            }
                             crate::redis::command::ClusterCmd::Info() => Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
                                 (
                                     HashableValue::String(Cow::from("cluster_state")),
@@ -164,8 +217,13 @@ impl RESPServer {
                                     HashableValue::String(Cow::from("cluster_my_epoch")),
                                     Value::HashableValue(HashableValue::Integer(1)),
                                 ),
-                            ]))),
-                            crate::redis::command::ClusterCmd::Slots() => cluster_as_shards(&storage_proxy),
+                            ])))
+                            .to_bytes(),
+
+                            crate::redis::command::ClusterCmd::Slots() => {
+                                let topology = storage_proxy.get_topology().unwrap();
+                                cluster_shards_response(&topology).to_bytes()
+                            }
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
                             // TODO: get that through reflection
@@ -213,11 +271,10 @@ impl RESPServer {
                                 // Sub commands
                                 Value::NonHashableValue(NonHashableValue::Array(vec![])),
                             ])),
-                        ])),
+                        ]))
+                        .to_bytes(),
                     };
 
-                    let mut resp_bytes = vec![];
-                    redis_value_to_bytes(&resp, &mut resp_bytes);
                     // println!("Answering: {:?}", str::from_utf8(&resp_bytes).unwrap());
                     handler.write_resp(resp_bytes).await;
                 }
