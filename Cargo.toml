@@ -18,6 +18,7 @@ tokio = { version = "1.37.0", features = ["net"] }
 structopt = "0.3.26"
 async-channel = "2.3.1"
 crc16-xmodem-fast = "0.4.0"
+uuid = { version = "1.11.0", features = ["v4"] }
 
 [dev-dependencies]
 criterion = "0.4.0"

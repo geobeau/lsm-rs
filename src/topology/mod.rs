@@ -1,5 +1,7 @@
 use std::{collections::HashMap, hash::Hash, net::IpAddr};
 
+use uuid::Uuid;
+
 pub const MAX_RANGE: u16 = 2u16.pow(14);
 
 #[derive(PartialEq, Debug, Clone)]
@@ -10,15 +12,10 @@ pub struct ShardRange {
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub struct ReactorMetadata {
+    pub node_id: Uuid,
     pub id: u8,
     pub ip: IpAddr,
     pub port: u16,
-}
-
-#[derive(Clone, Debug)]
-pub struct LocalTopology {
-    pub reactor: ReactorMetadata,
-    pub shards: Vec<ShardRange>,
 }
 
 #[derive(Clone, Debug)]

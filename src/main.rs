@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::thread;
 use structopt::StructOpt;
+use uuid::Uuid;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "lsm-rs", about = "lsm-rs is a (mostly) Redis compatible database")]
@@ -31,12 +32,16 @@ fn main() {
     let mut reactor_metadatas = Vec::with_capacity(opt.reactors_total as usize);
     let mut port = 6379;
     let mut mesh: HashMap<u8, async_channel::Sender<Topology>> = HashMap::new();
+    // TODO: persist this
+    let node_id = Uuid::new_v4();
+    println!("Start node with ID: {}", node_id);
 
     // Chan to send message to the cluster manager
     let (cluster_sender, cluster_receiver) = async_channel::unbounded();
 
     for reactor_id in 0..opt.reactors_total {
         let metadata = ReactorMetadata {
+            node_id,
             id: reactor_id as u8,
             ip: std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             port,
