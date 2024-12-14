@@ -126,8 +126,8 @@ impl RESPServer {
                                 panic!("Unexpected response")
                             }
                         }
-                        Command::Topology(cluster_cmd) => match cluster_cmd {
-                            crate::redis::command::TopologyCmd::Info() => Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
+                        Command::Cluster(cluster_cmd) => match cluster_cmd {
+                            crate::redis::command::ClusterCmd::Info() => Value::NonHashableValue(NonHashableValue::Map(HashMap::from([
                                 (
                                     HashableValue::String(Cow::from("cluster_state")),
                                     Value::HashableValue(HashableValue::String(Cow::from("ok"))),
@@ -165,7 +165,7 @@ impl RESPServer {
                                     Value::HashableValue(HashableValue::Integer(1)),
                                 ),
                             ]))),
-                            crate::redis::command::TopologyCmd::Slots() => cluster_as_shards(&storage_proxy),
+                            crate::redis::command::ClusterCmd::Slots() => cluster_as_shards(&storage_proxy),
                         },
                         Command::Command() => Value::NonHashableValue(NonHashableValue::Array(vec![
                             // TODO: get that through reflection
