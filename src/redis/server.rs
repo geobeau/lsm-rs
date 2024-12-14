@@ -3,10 +3,12 @@ use std::{borrow::Cow, collections::HashMap, rc::Rc, vec};
 use monoio::{io::BufReader, net::TcpListener};
 
 use crate::{
-    api, record, redis::{
+    api, record,
+    redis::{
         command::{ClientCmd, Command, RESPHandler},
         resp::{redis_value_to_bytes, HashableValue, NonHashableValue, Value},
-    }, storageproxy::StorageProxy, topology::{self, Topology}
+    },
+    storageproxy::StorageProxy,
 };
 
 // Serve the Redis serialization protocol (RESP)

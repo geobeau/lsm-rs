@@ -1,7 +1,6 @@
-use futures::channel::mpsc;
 use lsm_rs::cluster::ClusterManager;
-use lsm_rs::topology::{self, LocalTopology, ReactorMetadata, Topology};
-use lsm_rs::reactor::{ Reactor};
+use lsm_rs::reactor::Reactor;
+use lsm_rs::topology::{ReactorMetadata, Topology};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::thread;
@@ -51,9 +50,7 @@ fn main() {
     let cm = ClusterManager::new(reactor_metadatas.clone(), opt.shard_total, mesh, None);
     reactors[0].cluster_manager(cm);
 
-
     println!("{:?}", opt.data_dir);
-    
 
     for reactor in reactors {
         let t = thread::spawn(move || {

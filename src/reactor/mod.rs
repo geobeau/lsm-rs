@@ -1,9 +1,13 @@
-use std::{borrow::Borrow, path::PathBuf, rc::Rc, time::Duration};
+use std::{path::PathBuf, rc::Rc};
 
-use monoio::{join, time::sleep};
+use monoio::{join};
 
 use crate::{
-    cluster::ClusterManager, memcached::server::MemcachedBinaryServer, redis::server::RESPServer, storageproxy::StorageProxy, topology::{LocalTopology, ReactorMetadata, Topology}
+    cluster::ClusterManager,
+    memcached::server::MemcachedBinaryServer,
+    redis::server::RESPServer,
+    storageproxy::StorageProxy,
+    topology::{ReactorMetadata, Topology},
 };
 
 pub struct TopologyUpdater {
@@ -27,9 +31,8 @@ pub struct Reactor {
     receiver: async_channel::Receiver<Topology>,
     data_dir: PathBuf,
     cm: Option<ClusterManager>,
-    shard_total: u16
+    shard_total: u16,
 }
-
 
 impl Reactor {
     pub fn new(reactor: ReactorMetadata, shard_total: u16, receiver: async_channel::Receiver<Topology>, data_dir: PathBuf) -> Reactor {
@@ -40,13 +43,11 @@ impl Reactor {
             cm: None,
             shard_total,
         }
-
     }
 
     pub fn cluster_manager(&mut self, cm: ClusterManager) {
         self.cm = Some(cm);
     }
-
 
     pub fn start(&self) {
         println!("Start reactor {}", self.metadata.id);
@@ -66,14 +67,12 @@ impl Reactor {
             let id = 0;
             println!("Starting executor {}", id);
 
-
             match &self.cm {
                 Some(cm) => {
                     cm.start().await;
-                },
+                }
                 None => (),
             };
-
 
             let storage_proxy = Rc::from(StorageProxy::new(self.metadata.clone(), self.shard_total, &self.data_dir).await);
 
@@ -97,4 +96,3 @@ impl Reactor {
         });
     }
 }
-

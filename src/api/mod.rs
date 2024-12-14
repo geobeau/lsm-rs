@@ -1,6 +1,6 @@
 use crate::{
-    topology,
     record::{HashedKey, Key, Record},
+    topology,
 };
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl Command {
             Command::Delete(c) => &c.key.string,
             Command::Set(c) => &c.record.key.string,
         };
-        return crc16_xmodem_fast::hash(&key.as_bytes()) as u16;
+        return crc16_xmodem_fast::hash(key.as_bytes()) as u16;
     }
 }
 

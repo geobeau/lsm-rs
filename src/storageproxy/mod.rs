@@ -1,20 +1,24 @@
 mod shard;
 
-use std::{cell::RefCell, collections::{HashMap, HashSet}, path::PathBuf, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+};
 
 use shard::Shard;
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp}, topology::{self, ReactorMetadata, Topology}
+    api::{Command, DeleteResp, GetResp, Response, SetResp},
+    topology::{self, ReactorMetadata, Topology},
 };
-
 
 #[derive(Debug)]
 pub struct CommandHandle {
     pub command: Command,
     // pub sender: SharedSender<Response>,
 }
-
 
 /// Provide safe access to shards
 struct Shards {
@@ -25,12 +29,12 @@ struct Shards {
 impl Shards {
     pub fn new() -> Shards {
         Shards {
-            shards: RefCell::new(HashMap::new())
+            shards: RefCell::new(HashMap::new()),
         }
     }
 
     pub fn get_shard(&self, shard_id: &u16) -> Option<Rc<Shard>> {
-        self.shards.borrow().get(&shard_id).cloned()
+        self.shards.borrow().get(shard_id).cloned()
     }
 
     pub fn insert_shard(&self, shard_id: u16, shard: Rc<Shard>) {
@@ -38,17 +42,16 @@ impl Shards {
     }
 
     pub fn remove_shard(&self, shard_id: &u16) -> Option<Rc<Shard>> {
-        self.shards.borrow_mut().remove(&shard_id)
+        self.shards.borrow_mut().remove(shard_id)
     }
 
     pub fn keys(&self) -> Vec<u16> {
-        return self.shards.borrow().keys().cloned().collect()
+        return self.shards.borrow().keys().cloned().collect();
     }
 
     pub fn len(&self) -> usize {
-        return self.shards.borrow().len()
+        return self.shards.borrow().len();
     }
-    
 }
 
 pub struct StorageProxy {
@@ -56,7 +59,7 @@ pub struct StorageProxy {
     pub shards_count: u16,
     data_dir: PathBuf,
     reactor_metadata: ReactorMetadata,
-    topology:RefCell<Option<Rc<Topology>>>
+    topology: RefCell<Option<Rc<Topology>>>,
 }
 
 impl StorageProxy {
@@ -70,24 +73,26 @@ impl StorageProxy {
         }
     }
 
-
     pub async fn apply_new_topology(&self, topology: &Topology) {
         let shard_ranges = topology.reactor_allocations.get(&self.reactor_metadata).unwrap();
 
         let mut incoming_shards = HashSet::with_capacity(shard_ranges.len());
-        shard_ranges.into_iter().for_each(|sr| {incoming_shards.insert(sr.start);});
+        shard_ranges.iter().for_each(|sr| {
+            incoming_shards.insert(sr.start);
+        });
 
         let mut existing_shards = HashSet::with_capacity(self.shards.len());
-        self.shards.keys().into_iter().for_each(|s| {existing_shards.insert(s);});
+        self.shards.keys().into_iter().for_each(|s| {
+            existing_shards.insert(s);
+        });
 
-        
         let shards_to_add = incoming_shards.difference(&existing_shards);
         let shards_to_remove = existing_shards.difference(&incoming_shards);
 
         for start in shards_to_add {
             let mut shard_path = PathBuf::new();
             shard_path.push(format!("{}", start));
-            let shard = Rc::from(Shard::new(self.reactor_metadata.id, self.data_dir.join(shard_path)).await);
+            let shard = Shard::new(self.reactor_metadata.id, self.data_dir.join(shard_path)).await;
             self.shards.insert_shard(*start, shard);
         }
 
@@ -98,7 +103,7 @@ impl StorageProxy {
             }
         }
 
-        self.topology.borrow_mut().insert(Rc::from(topology.clone()));
+        let _ = self.topology.borrow_mut().insert(Rc::from(topology.clone()));
     }
 
     pub async fn dispatch_local(&self, shard: Rc<Shard>, cmd: Command) -> Response {
@@ -122,11 +127,18 @@ impl StorageProxy {
         let cmd_slot = cmd.get_slot();
         let shard_id = topology::compute_shard_id(cmd_slot, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
-    
+
         match self.shards.get_shard(&shard_id) {
             Some(shard) => self.dispatch_local(shard.clone(), cmd).await,
             None => {
-                println!("[reactor {}] shard {} not managed by this reactor (slot: {}, crc16: {}, cmd: {:?})", self.reactor_metadata.id, shard_id, cmd_slot, cmd.get_crc16(), cmd);
+                println!(
+                    "[reactor {}] shard {} not managed by this reactor (slot: {}, crc16: {}, cmd: {:?})",
+                    self.reactor_metadata.id,
+                    shard_id,
+                    cmd_slot,
+                    cmd.get_crc16(),
+                    cmd
+                );
                 todo!(); // TODO: return a moved information
             }
         }

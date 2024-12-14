@@ -1,4 +1,3 @@
-
 use std::{path::PathBuf, rc::Rc, time::Duration};
 
 use monoio::time::sleep;
@@ -39,18 +38,14 @@ pub struct Shard {
     pub datastore: DataStore,
 }
 
-
 impl Shard {
     pub async fn new(reactor_id: u8, data_dir: PathBuf) -> Rc<Shard> {
         let datastore = DataStore::new(data_dir).await;
-        let shard = Rc::from(Shard{
-            datastore,
-        });
+        let shard = Rc::from(Shard { datastore });
         start_compaction_manager(shard.clone());
         start_flush_manager(shard.clone());
         start_stat_manager(shard.clone(), reactor_id);
         println!("datastore inited");
-        return shard;
+        shard
     }
 }
-
