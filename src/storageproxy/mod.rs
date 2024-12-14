@@ -10,7 +10,7 @@ use std::{
 use shard::Shard;
 
 use crate::{
-    api::{Command, DeleteResp, GetResp, Response, SetResp},
+    api::{ClusterCommand, Command, DataCommand, DeleteResp, GetResp, Response, SetResp},
     cluster::ClusterMessage,
     topology::{self, ReactorMetadata, Topology},
 };
@@ -114,17 +114,17 @@ impl StorageProxy {
         let _ = self.topology.borrow_mut().insert(Rc::from(topology.clone()));
     }
 
-    pub async fn dispatch_local(&self, shard: Rc<Shard>, cmd: Command) -> Response {
+    pub async fn dispatch_local_data(&self, shard: Rc<Shard>, cmd: DataCommand) -> Response {
         match cmd {
-            Command::Get(c) => {
+            DataCommand::Get(c) => {
                 let record = shard.datastore.get(&c.key).await;
                 Response::Get(GetResp { record })
             }
-            Command::Delete(c) => {
+            DataCommand::Delete(c) => {
                 shard.datastore.delete(&c.key);
                 Response::Delete(DeleteResp {})
             }
-            Command::Set(c) => {
+            DataCommand::Set(c) => {
                 shard.datastore.set(c.record);
                 Response::Set(SetResp {})
             }
@@ -132,12 +132,32 @@ impl StorageProxy {
     }
 
     pub async fn dispatch(&self, cmd: Command) -> Response {
+        match cmd {
+            Command::Data(data_command) => self.dispatch_data(data_command).await,
+            Command::Cluster(cluster_command) => self.dispatch_cluster(cluster_command).await,
+        }
+    }
+
+    pub async fn dispatch_cluster(&self, cmd: ClusterCommand) -> Response {
+        let (sender, receiver) = async_channel::bounded(1);
+
+        let msg = ClusterMessage {
+            response_chan: sender,
+            command: cmd,
+        };
+
+        self.cluster_sender.send(msg).await.unwrap();
+        let resp = receiver.recv().await;
+        resp.unwrap()
+    }
+
+    pub async fn dispatch_data(&self, cmd: DataCommand) -> Response {
         let cmd_slot = cmd.get_slot();
         let shard_id = topology::compute_shard_id(cmd_slot, self.shards_count);
         // println!("{cmd:?} dispatching {cmd_shard} on {range_start}");
 
         match self.shards.get_shard(&shard_id) {
-            Some(shard) => self.dispatch_local(shard.clone(), cmd).await,
+            Some(shard) => self.dispatch_local_data(shard.clone(), cmd).await,
             None => {
                 println!(
                     "[reactor {}] shard {} not managed by this reactor (slot: {}, crc16: {}, cmd: {:?})",

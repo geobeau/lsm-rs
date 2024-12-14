@@ -14,12 +14,13 @@ pub enum Command {
 
 impl Command {
     pub fn to_api_command(self) -> api::Command {
-        match self {
-            Command::Set(s) => api::Command::Set(api::Set {
+        api::Command::Data(match self {
+            Command::Set(s) => api::DataCommand::Set(api::Set {
                 record: Record::new(s.key, s.data),
             }),
-            Command::Get(g) => api::Command::Get(api::Get { key: Key::new(g.key) }),
-        }
+            Command::Get(g) => api::DataCommand::Get(api::Get { key: Key::new(g.key) }),
+            _ => todo!(),
+        })
     }
 }
 
@@ -56,6 +57,7 @@ impl Response {
                 opcode: OpCode::NoError,
                 cas: 0,
             }),
+            _ => todo!(),
         }
     }
 }

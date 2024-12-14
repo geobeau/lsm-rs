@@ -60,7 +60,7 @@ fn main() {
 
     println!("{:?}", opt.data_dir);
 
-    for reactor in reactors {
+    for mut reactor in reactors {
         let t = thread::spawn(move || {
             reactor.start();
         });

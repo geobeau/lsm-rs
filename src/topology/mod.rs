@@ -61,6 +61,14 @@ impl Topology {
             reactor_allocations,
         }
     }
+
+    pub fn add_reactors(&mut self, reactors: Vec<ReactorMetadata>) {
+        for reactor in reactors {
+            self.reactor_allocations.insert(reactor, vec![]);
+        }
+    }
+
+    pub fn rebalance(&mut self) {}
 }
 
 /// Align `shard` with the proper slot (slot are determined by the number of shards)

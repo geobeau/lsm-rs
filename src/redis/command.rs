@@ -77,9 +77,9 @@ pub struct SetCmd {
 
 impl SetCmd {
     pub fn to_api_command(&self) -> api::Command {
-        api::Command::Set(api::Set {
+        api::Command::Data(api::DataCommand::Set(api::Set {
             record: Record::new(self.key.clone(), self.value.clone()),
-        })
+        }))
     }
 }
 
@@ -90,9 +90,9 @@ pub struct GetCmd {
 
 impl GetCmd {
     pub fn to_api_command(&self) -> api::Command {
-        api::Command::Get(api::Get {
+        api::Command::Data(api::DataCommand::Get(api::Get {
             key: Key::new(self.key.clone()),
-        })
+        }))
     }
 }
 

@@ -1,21 +1,37 @@
 use crate::{
     record::{HashedKey, Key, Record},
-    topology,
+    topology::{self, ReactorMetadata, Topology},
 };
 
 #[derive(Debug)]
 pub enum Command {
+    Data(DataCommand),
+    Cluster(ClusterCommand),
+}
+
+#[derive(Debug)]
+pub enum DataCommand {
     Get(Get),
     Delete(Delete),
     Set(Set),
 }
 
-impl Command {
+#[derive(Debug)]
+pub enum ClusterCommand {
+    Join(Join),
+}
+
+#[derive(Debug)]
+pub struct Join {
+    pub reactors: Vec<ReactorMetadata>,
+}
+
+impl DataCommand {
     pub fn get_hash(&self) -> &HashedKey {
         match self {
-            Command::Get(c) => &c.key.hash,
-            Command::Delete(c) => &c.key.hash,
-            Command::Set(c) => &c.record.key.hash,
+            DataCommand::Get(c) => &c.key.hash,
+            DataCommand::Delete(c) => &c.key.hash,
+            DataCommand::Set(c) => &c.record.key.hash,
         }
     }
 
@@ -27,9 +43,9 @@ impl Command {
     // TODO: maybe pre-calculate it?
     pub fn get_crc16(&self) -> u16 {
         let key = match self {
-            Command::Get(c) => &c.key.string,
-            Command::Delete(c) => &c.key.string,
-            Command::Set(c) => &c.record.key.string,
+            DataCommand::Get(c) => &c.key.string,
+            DataCommand::Delete(c) => &c.key.string,
+            DataCommand::Set(c) => &c.record.key.string,
         };
         return crc16_xmodem_fast::hash(key.as_bytes()) as u16;
     }
@@ -54,6 +70,7 @@ pub enum Response {
     Get(GetResp),
     Delete(DeleteResp),
     Set(SetResp),
+    ClusterTopology(ClusterTopologyResp),
 }
 
 pub struct GetResp {
@@ -63,3 +80,7 @@ pub struct GetResp {
 pub struct SetResp {}
 
 pub struct DeleteResp {}
+
+pub struct ClusterTopologyResp {
+    pub topology: Topology,
+}

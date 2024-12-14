@@ -57,7 +57,7 @@ impl Reactor {
         self.cm = Some(cm);
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         println!("Start reactor {}", self.metadata.id);
 
         let urb = io_uring::IoUring::builder();
@@ -75,7 +75,7 @@ impl Reactor {
             let id = 0;
             println!("Starting executor {}", id);
 
-            match &self.cm {
+            match &mut self.cm {
                 Some(cm) => {
                     cm.start().await;
                 }

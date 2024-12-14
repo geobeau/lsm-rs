@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::topology::{self, ReactorMetadata, Topology};
+use crate::{
+    api::{self, ClusterTopologyResp, Response},
+    topology::{self, ReactorMetadata, Topology},
+};
 
 pub struct ClusterManager {
     mesh: HashMap<u8, async_channel::Sender<Topology>>,
@@ -8,8 +11,9 @@ pub struct ClusterManager {
     receiver: async_channel::Receiver<ClusterMessage>,
 }
 
-pub enum ClusterMessage {
-    Join,
+pub struct ClusterMessage {
+    pub response_chan: async_channel::Sender<Response>,
+    pub command: api::ClusterCommand,
 }
 
 impl ClusterManager {
@@ -32,8 +36,26 @@ impl ClusterManager {
         topology::Topology::new_with_reactors(shards_total, local_reactors)
     }
 
-    pub async fn start(&self) {
+    pub async fn start(&mut self) {
         self.broadcast_topology().await;
+        loop {
+            let msg = self.receiver.recv().await.unwrap();
+            match msg.command {
+                api::ClusterCommand::Join(join) => self.join_new_node(join.reactors),
+            }
+            msg.response_chan
+                .send(Response::ClusterTopology(ClusterTopologyResp {
+                    topology: self.topology.clone(),
+                }))
+                .await
+                .unwrap();
+            self.broadcast_topology().await;
+        }
+    }
+
+    fn join_new_node(&mut self, new_reactors: Vec<ReactorMetadata>) {
+        self.topology.add_reactors(new_reactors);
+        self.topology.rebalance();
     }
 
     async fn broadcast_topology(&self) {
