@@ -1,4 +1,4 @@
-use lsm_rs::cluster::ClusterManager;
+use lsm_rs::cluster::ClusterManagerBuilder;
 use lsm_rs::reactor::Reactor;
 use lsm_rs::topology::{ReactorMetadata, Topology};
 use std::collections::HashMap;
@@ -55,7 +55,7 @@ fn main() {
         port += 1;
     }
 
-    let cm = ClusterManager::new(reactor_metadatas.clone(), opt.shard_total, mesh, cluster_receiver, None);
+    let cm: ClusterManagerBuilder = ClusterManagerBuilder::new(reactor_metadatas.clone(), opt.shard_total, mesh, cluster_receiver, None);
     reactors[0].cluster_manager(cm);
 
     println!("{:?}", opt.data_dir);

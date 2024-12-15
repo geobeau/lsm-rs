@@ -3,7 +3,7 @@ use std::{path::PathBuf, rc::Rc};
 use monoio::join;
 
 use crate::{
-    cluster::{ClusterManager, ClusterMessage},
+    cluster::{ClusterManagerBuilder, ClusterMessage},
     memcached::server::MemcachedBinaryServer,
     redis::server::RESPServer,
     storageproxy::StorageProxy,
@@ -30,7 +30,7 @@ pub struct Reactor {
     metadata: ReactorMetadata,
     receiver: async_channel::Receiver<Topology>,
     data_dir: PathBuf,
-    cm: Option<ClusterManager>,
+    cmb: Option<ClusterManagerBuilder>,
     shard_total: u16,
     cluster_sender: async_channel::Sender<ClusterMessage>,
 }
@@ -48,13 +48,13 @@ impl Reactor {
             receiver,
             data_dir,
             cluster_sender,
-            cm: None,
+            cmb: None,
             shard_total,
         }
     }
 
-    pub fn cluster_manager(&mut self, cm: ClusterManager) {
-        self.cm = Some(cm);
+    pub fn cluster_manager(&mut self, cmb: ClusterManagerBuilder) {
+        self.cmb = Some(cmb);
     }
 
     pub fn start(&mut self) {
@@ -75,9 +75,10 @@ impl Reactor {
             let id = 0;
             println!("Starting executor {}", id);
 
-            match &mut self.cm {
-                Some(cm) => {
-                    cm.start().await;
+            match &self.cmb {
+                Some(cmb) => {
+                    let mut cm = cmb.build().await;
+                    monoio::spawn(async move { cm.start_master().await });
                 }
                 None => (),
             };
@@ -89,7 +90,7 @@ impl Reactor {
                 &self.data_dir,
             ));
 
-            let topology_updated = TopologyUpdater {
+            let topology_updater = TopologyUpdater {
                 receiver: self.receiver.clone(),
                 storage_proxy: storage_proxy.clone(),
             };
@@ -104,7 +105,7 @@ impl Reactor {
                 storage_proxy: storage_proxy.clone(),
             };
 
-            join!(resp.listen(), memcached.listen(), topology_updated.start());
+            join!(resp.listen(), memcached.listen(), topology_updater.start());
             println!("Terminated");
         });
     }
