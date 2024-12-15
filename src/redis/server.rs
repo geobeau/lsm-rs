@@ -9,59 +9,15 @@ use crate::{
         resp::{HashableValue, NonHashableValue, Value},
     },
     storageproxy::StorageProxy,
-    topology::{ReactorMetadata, ShardRange, Topology},
+    topology::Topology,
 };
+
+use super::serde::ToResp;
 
 // Serve the Redis serialization protocol (RESP)
 pub struct RESPServer {
     pub host_port: String,
     pub storage_proxy: Rc<StorageProxy>,
-}
-
-fn reactor_metadata_to_resp(reactor: &ReactorMetadata) -> Value {
-    let mut map = HashMap::with_capacity(4);
-    map.insert(
-        HashableValue::String(Cow::from("node_id")),
-        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.node_id)))),
-    );
-    map.insert(
-        HashableValue::String(Cow::from("id")),
-        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.id)))),
-    );
-    map.insert(
-        HashableValue::String(Cow::from("ip")),
-        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.ip)))),
-    );
-    map.insert(
-        HashableValue::String(Cow::from("port")),
-        Value::HashableValue(HashableValue::String(Cow::from(format!("{}", reactor.port)))),
-    );
-    Value::NonHashableValue(NonHashableValue::Map(map))
-}
-
-fn range_to_resp(range: &ShardRange) -> Value {
-    return Value::NonHashableValue(NonHashableValue::Array(vec![
-        Value::HashableValue(HashableValue::Integer(range.start as i64)),
-        Value::HashableValue(HashableValue::Integer(range.end as i64)),
-    ]));
-}
-
-/// Custom topology response only for internal use
-fn cluster_topology_response(topology: &Topology) -> Value {
-    let shards = topology
-        .reactor_allocations
-        .iter()
-        .map(|(reactor, ranges)| {
-            let resp_ranges: Vec<Value<'_>> = ranges.iter().map(|shard_range| range_to_resp(shard_range)).collect();
-
-            Value::NonHashableValue(NonHashableValue::Array(vec![
-                reactor_metadata_to_resp(reactor),
-                Value::NonHashableValue(NonHashableValue::Array(resp_ranges)),
-            ]))
-        })
-        .collect();
-
-    return Value::NonHashableValue(NonHashableValue::Array(shards));
 }
 
 // Return a redis compatible topology
@@ -175,7 +131,7 @@ impl RESPServer {
                         Command::Cluster(cluster_cmd) => match cluster_cmd {
                             crate::redis::command::ClusterCmd::Join(join_cmd) => {
                                 if let api::Response::ClusterTopology(resp) = storage_proxy.dispatch(join_cmd.to_api_command()).await {
-                                    cluster_topology_response(&resp.topology).to_bytes()
+                                    resp.topology.to_resp().to_bytes()
                                 } else {
                                     panic!("Unexpected response")
                                 }

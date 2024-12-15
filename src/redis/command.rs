@@ -1,5 +1,4 @@
 use core::str;
-use std::borrow::Cow;
 
 use monoio::io::{AsyncBufRead, AsyncWriteRentExt, BufReader};
 
@@ -10,7 +9,10 @@ use crate::{
     topology::ReactorMetadata,
 };
 
-use super::resp::{HashableValue, Value};
+use super::{
+    resp::{HashableValue, Value},
+    serde::FromResp,
+};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -149,30 +151,7 @@ fn parse_cluster_join_command(args: &[Value]) -> Command {
         _ => todo!(),
     };
 
-    let reactors = raw_reactors
-        .iter()
-        .map(|value| {
-            let raw_reactor = match value {
-                Value::NonHashableValue(non_hashable_value) => match non_hashable_value {
-                    NonHashableValue::Map(vec) => vec,
-                    _ => todo!(),
-                },
-                _ => todo!(),
-            };
-
-            let node_id = raw_reactor.get(&HashableValue::String(Cow::from("node_id"))).unwrap();
-            let id = raw_reactor.get(&HashableValue::String(Cow::from("id"))).unwrap();
-            let ip = raw_reactor.get(&HashableValue::String(Cow::from("ip"))).unwrap();
-            let port = raw_reactor.get(&HashableValue::String(Cow::from("port"))).unwrap();
-
-            ReactorMetadata {
-                node_id: node_id.try_as_str().unwrap().parse().unwrap(),
-                id: id.try_as_str().unwrap().parse().unwrap(),
-                ip: ip.try_as_str().unwrap().parse().unwrap(),
-                port: port.try_as_str().unwrap().parse().unwrap(),
-            }
-        })
-        .collect();
+    let reactors = raw_reactors.iter().map(|value| ReactorMetadata::from_resp(value)).collect();
 
     Command::Cluster(ClusterCmd::Join(JoinCmd { reactors }))
 }
@@ -240,6 +219,20 @@ impl RESPHandler {
         self.stream.consume(consummed_buffer_length);
 
         Ok(cmd)
+    }
+
+    pub async fn decode_response<T: FromResp>(&mut self) -> Result<T, std::io::Error> {
+        let buffer = self.stream.fill_buf().await.unwrap();
+        if buffer.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "empty buffer"));
+        }
+        let (remaining_buffer, val) = parse(buffer).unwrap();
+
+        let ret = Ok(T::from_resp(&val));
+
+        let consummed_buffer_length = buffer.len() - remaining_buffer.len();
+        self.stream.consume(consummed_buffer_length);
+        ret
     }
 
     pub async fn write_resp(&mut self, buff: Vec<u8>) {
